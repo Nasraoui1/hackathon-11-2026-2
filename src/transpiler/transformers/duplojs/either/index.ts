@@ -7,6 +7,8 @@ import * as DPattern from "@duplojs/lang/pattern";
 import { successExpressionHandler, successTypeHandler } from "./success";
 import { isRightExpressionHandler } from "./isRight";
 import { failExpressionHandler, failTypeHandler } from "./fail";
+import { leftExpressionHandler, leftTypeHandler } from "./left";
+import { matchInformationExpressionHandler } from "./matchInformation";
 import { unionTypeHandler } from "./union";
 import * as DArray from "@duplojs/lang/array";
 
@@ -50,6 +52,14 @@ export const duploJSEitherExpressionTransformer: Transformer<GoAST.Expression> =
 				() => failExpressionHandler(node, context),
 			),
 			DPattern.match(
+				DCommon.equal("left"),
+				() => leftExpressionHandler(node, context),
+			),
+			DPattern.match(
+				DCommon.equal("matchInformation"),
+				() => matchInformationExpressionHandler(node, context),
+			),
+			DPattern.match(
 				DCommon.equal("isRight"),
 				() => isRightExpressionHandler(node, context),
 			),
@@ -86,6 +96,10 @@ export const duploJSEitherTypeTransformer: Transformer<GoAST.GenericTypeReferenc
 			DPattern.match(
 				DCommon.equal("Fail"),
 				() => failTypeHandler(context),
+			),
+			DPattern.match(
+				DCommon.equal("Left"),
+				() => leftTypeHandler(node, context),
 			),
 			DPattern.otherwise(
 				() => context.notSupport(),

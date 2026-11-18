@@ -7,32 +7,64 @@ export const printFunctionIdentifier = GoAST.createIdentifier("Print");
 /**
  * ```go
  * func Print[T any](value T) T {
- *     encoder := json.NewEncoder(os.Stdout)
- *     encoder.SetEscapeHTML(false)
- *     encoder.SetIndent("", "  ")
- *     encoder.Encode(value)
+ *     switch typed := any(value).(type) {
+ *     case string:
+ *         fmt.Println(typed)
+ *     default:
+ *         encoder := json.NewEncoder(os.Stdout)
+ *         encoder.SetEscapeHTML(false)
+ *         encoder.SetIndent("", "  ")
+ *         encoder.Encode(typed)
+ *     }
  *     return value
  * }
  * ```
  * Comme `DCommon.print`, la valeur est affichée puis retournée.
- * Le rendu est JSON (tags `json` des variantes Either) et non `util.inspect` de Node.
+ * Une chaîne seule est affichée brute, comme `console.info("texte")`.
+ * Le reste est rendu en JSON (tags `json` des variantes Either), et non `util.inspect` de Node.
  */
 export const printDependency = DCommon.memo(() => {
 	const generic = GoAST.createIdentifier("T");
 	const value = GoAST.createIdentifier("value");
 	const encoder = GoAST.createIdentifier("encoder");
+	const typed = GoAST.createIdentifier("typed");
 
-	const callEncoder = (method: string, argumentsList: readonly GoAST.Expression[]) => GoAST.createCallExpression({
+	const callMethod = (
+		target: GoAST.Identifier,
+		method: string,
+		argumentsList: readonly GoAST.Expression[],
+	) => GoAST.createCallExpression({
 		callee: GoAST.createSelectorExpression({
-			target: encoder,
+			target,
 			identifier: GoAST.createIdentifier(method),
 		}),
 		arguments: argumentsList,
 	});
 
+	const printString = callMethod(GoAST.createIdentifier("fmt"), "Println", [typed]);
+
+	const printJson = [
+		GoAST.createShortVariableDeclarationStatement({
+			identifier: encoder,
+			initializer: callMethod(GoAST.createIdentifier("json"), "NewEncoder", [
+				GoAST.createSelectorExpression({
+					target: GoAST.createIdentifier("os"),
+					identifier: GoAST.createIdentifier("Stdout"),
+				}),
+			]),
+		}),
+		callMethod(encoder, "SetEscapeHTML", [GoAST.createBooleanLiteral({ value: false })]),
+		callMethod(encoder, "SetIndent", [
+			GoAST.createStringLiteral({ value: "" }),
+			GoAST.createStringLiteral({ value: "  " }),
+		]),
+		callMethod(encoder, "Encode", [typed]),
+	];
+
 	return createSharedDependency({
 		imports: [
 			GoAST.createImportDeclaration({ path: "encoding/json" }),
+			GoAST.createImportDeclaration({ path: "fmt" }),
 			GoAST.createImportDeclaration({ path: "os" }),
 		],
 		init: [],
@@ -54,27 +86,21 @@ export const printDependency = DCommon.memo(() => {
 				returnTypes: [generic],
 				body: GoAST.createBlockStatement({
 					statements: [
-						GoAST.createShortVariableDeclarationStatement({
-							identifier: encoder,
-							initializer: GoAST.createCallExpression({
-								callee: GoAST.createSelectorExpression({
-									target: GoAST.createIdentifier("json"),
-									identifier: GoAST.createIdentifier("NewEncoder"),
-								}),
-								arguments: [
-									GoAST.createSelectorExpression({
-										target: GoAST.createIdentifier("os"),
-										identifier: GoAST.createIdentifier("Stdout"),
-									}),
-								],
+						GoAST.createTypeSwitchStatementWithDefault({
+							identifier: typed,
+							expression: GoAST.createConversionExpression({
+								typeReference: GoAST.builtinTypeReferences.any,
+								operand: value,
 							}),
+							casesBeforeDefault: [
+								GoAST.createTypeSwitchCase({
+									types: DCommon.cast([GoAST.builtinTypeReferences.string]),
+									statements: [printString],
+								}),
+							],
+							defaultCase: GoAST.createDefaultCase({ statements: printJson }),
+							casesAfterDefault: [],
 						}),
-						callEncoder("SetEscapeHTML", [GoAST.createBooleanLiteral({ value: false })]),
-						callEncoder("SetIndent", [
-							GoAST.createStringLiteral({ value: "" }),
-							GoAST.createStringLiteral({ value: "  " }),
-						]),
-						callEncoder("Encode", [value]),
 						GoAST.createReturnStatement({ values: [value] }),
 					],
 				}),

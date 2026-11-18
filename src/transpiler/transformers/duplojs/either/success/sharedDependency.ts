@@ -1,7 +1,7 @@
 import * as DCommon from "@duplojs/lang/common";
 import { GoAST } from "@go";
 import { createSharedDependency } from "@transformer";
-import { createIsRightMethod } from "../sharedDependency";
+import { createEitherMethods } from "../sharedDependency";
 
 export const successFunctionIdentifier = GoAST.createIdentifier("EitherSuccessOf");
 export const successTypeIdentifier = GoAST.createIdentifier("EitherSuccess");
@@ -57,7 +57,7 @@ export const eitherSuccessDependency = DCommon.memo(() => {
 					],
 				}),
 			}),
-			createIsRightMethod(successTypeReference, true),
+			...createEitherMethods(successTypeReference, true),
 			GoAST.createFunctionDeclaration({
 				identifier: successFunctionIdentifier,
 				generic: [successTypeParameter],

@@ -34,7 +34,7 @@ Quand un choix change, mettre à jour ce fichier avant le code : il sert de mém
 | Tuple `[A, B, C]` homogène | `[3]T` | [Proposé] | Tableau Go de taille fixe : valeur, cardinalité conservée, pas d'allocation séparée. |
 | Tuple hétérogène | struct `{ V0 A; V1 B; … }` | [Proposé] | Position → champ, typage conservé. |
 | `null` / `undefined` | `shard_dependencies.JSNull` / `JSUndefined` | [Décidé] (boilerplate) | Types vides de taille nulle. Un champ `undefined` porte le tag `omitzero` : il est omis du JSON comme avec `JSON.stringify` (projet 04, `EitherFail.Value`). |
-| Union de littéraux string (`"a" \| "b"`) | `string` | [Proposé] | Les informations d'Either restent des strings : comparaison rapide, rendu identique. |
+| Types textuels : `string`, littéral, template, string brandé `string & X`, et leurs unions | `string` | [Décidé] (projet 06, `type/string.ts`) | La marque et le littéral n'existent que dans les types ; TypeScript a déjà vérifié la valeur. |
 | `Promise<T>` | voir §6 | [Proposé] | — |
 
 Généricité : une fonction générique Go **doit être instanciée** lorsqu'elle est utilisée comme valeur (`EitherSuccessOf[float64]`). Les arguments de type se lisent dans le checker (type de l'appel / signature résolue), jamais dans le texte source. Le Go actuel du projet 00 ne compile pas pour cette raison (`cannot use generic function … without instantiation`) : à corriger en premier.
@@ -56,9 +56,10 @@ type EitherSuccess[T any] struct { Right JSNull; Information string; Value T; Su
 func (_ EitherSuccess[T]) IsRight() bool { return true }
 ```
 
-- Variantes existantes : `EitherSuccess[T]` (`success`), `EitherFail` (`fail`, projet 04). Un type Either seul (`Success<T>`, `Fail`) garde son type concret. Une union dont **tous** les membres sont des types Either devient `shard_dependencies.Either` (routeur `duploJSEitherUnionTypeTransformer`).
+- Variantes existantes : `EitherSuccess[T]` (`success`), `EitherFail` (`fail`, projet 04), `EitherLeft[T]` (`left(information, value)`, projet 06). Un type Either seul (`Success<T>`, `Fail`) garde son type concret. Une union dont **tous** les membres sont des types Either devient `shard_dependencies.Either` (routeur `duploJSEitherUnionTypeTransformer`).
 - Chaque variante est un type **défini** (pas un alias, sinon pas de méthode possible), avec ses tags `json`, et implémente `IsRight()` via `createIsRightMethod` (`either/sharedDependency.ts`).
-- `isRight(x)` → `x.IsRight()`. Pour lire la valeur typée d'une variante : assertion vers le type concret donné par le checker, ou type switch (`matchInformation`).
+- L'interface porte trois méthodes, générées pour chaque variante par `createEitherMethods` : `IsRight() bool`, `GetInformation() string`, `GetValue() any` (projet 06).
+- `isRight(x)` → `x.IsRight()`. Pour lire la valeur typée d'une union : `x.GetValue().(T)`, où `T` est le type attendu donné par le checker (par exemple le paramètre du callback). Coût : boxing de la valeur et assertion à l'exécution.
 - Pourquoi : Go convertit implicitement une variante vers l'interface, donc `return EitherSuccessOf(x)` compile sans connaître l'union. C'est la solution la plus simple.
 - Coût accepté et documenté : allocation sur le tas à la conversion vers l'interface, appel dynamique pour `IsRight()`.
 - Alternative écartée (optimisation future) : une struct plate `Either[R, L]` sans allocation. Go n'infère pas `L` depuis le type de retour attendu, donc il faudrait calculer `R` et `L` avec le checker et instancier chaque constructeur.
@@ -70,13 +71,15 @@ Rendu (`print`) : voir §7.
 - **Appel de fonction** : [Décidé] (projets 00, 01) arguments évalués dans l'ordre et stockés dans des temporaires. La fonction appelée n'est stockée dans un temporaire **que si elle n'est pas une déclaration de fonction** : une déclaration (locale, importée, membre de namespace) est immuable, donc on l'appelle directement, ce qui laisse Go inférer ses génériques.
 - **`const x = e`** : [Décidé] (projet 01) `Sourced_x := e`, type inféré par Go. Une seule déclaration, nom simple.
 - **`if` / `else`** : [Décidé] (projet 01) condition traduite avec ses `before` placés avant le `if` ; chaque branche est un bloc traduit indépendamment, et une instruction seule est enveloppée dans un bloc avec ses `before`.
-- **Ternaire `c ? a : b`** : [Proposé] déclaration du résultat puis `if/else`, et non un helper `ternary(c, a, b)` qui évaluerait les deux branches :
+- **Ternaire `c ? a : b`** : [Décidé] (projet 06, `expression/conditional.ts`) déclaration du résultat puis `if/else`, et non un helper `ternary(c, a, b)` qui évaluerait les deux branches :
   ```go
   var t T
   if c { /* before de a */ t = a } else { /* before de b */ t = b }
   ```
   Les `before` de `a` et `b` restent **dans** leur branche. Le type `T` vient du checker.
-- **`&&` / `||`** : court-circuit à préserver. Si l'opérande droit a des `before`, le transformer binaire actuel les remonte avant l'opérande gauche, ce qui est faux. Il faut alors utiliser la même forme `if` que le ternaire. Sans `before` à droite, garder l'opérateur Go natif.
+- **`&&` / `||`** : [Décidé] (projet 06, `expression/logical.ts`, placé avant `binary` dans la liste) `t := left; if t { t = right }` (`if !t` pour `||`) : l'opérande droit et ses `before` ne sont évalués que si nécessaire. Le transformer binaire générique évaluait les deux opérandes.
+- **Fonction fléchée** : [Décidé] (projet 06, `expression/arrowFunction.ts`) `(p) => e` → `func(p T) R { return e }`. `T` et `R` viennent du checker (le source ne les écrit souvent pas). Pas de déstructuration ni d'`async`.
+- **Type absent du source** : [Décidé] utiliser `transformCheckerType(type, location, context)` (`type/fromChecker.ts`) : `typeToTypeNode` du checker puis la liste des transformers de types.
 - **Plusieurs `return`** : [Décidé] (projet 04) rien de spécifique. Le type de retour (annoté ou inféré) est une union Either, donc l'interface `Either`, et Go convertit implicitement chaque variante retournée. Les `before` d'un `return` restent dans son bloc.
 - **Opérateurs préfixes** : [Décidé] (projet 04) `-x`, `+x`, `!x` deviennent l'opérateur Go identique (`-1` est `-` appliqué à `1`). `~x` (int32 en JS), `++x` et `--x` sont refusés.
 - **Déstructuration de paramètre `([a, b, c]) => …`** : [Proposé] paramètre Go unique (`[3]float64` ou struct), puis `a := p[0]`… en tête de corps. Si la fonction est dépliée dans une boucle (§5), lier directement depuis l'élément courant.
@@ -91,11 +94,11 @@ Les formes **data-first** `f(input, …)` et **data-last** `f(…)(input)` (curr
 | `whenIsRight(e, f)` | `if e.IsRight { out = f(e.Right) } else { out = e }`. Le type de `out` est l'union donnée par le checker. |
 | `whenIsRightOtherwise(e, f, g)` | `if e.IsRight { out = f(e.Right) } else { out = g(e) }` |
 | `rightPipe(x, f1, f2…)` | Chaîne de `if !acc.IsRight { goto/retour anticipé }`. Une étape qui renvoie une valeur non-Either passe telle quelle, et le résultat final est enveloppé dans `success` (cf. runtime). |
-| `matchInformation(e, {k: f})` | `switch e.Information { case "k": out = f(e.Value) }` |
+| `matchInformation(e, {k: f})` | [Décidé] (projet 06) entrée et callbacks évalués dans l'ordre, puis `var out T; switch e.GetInformation() { case "k": out = f(e.GetValue().(P)) }` ; l'argument n'est passé que si le callback a un paramètre. |
 | `group([e1, e2…])` | Boucle séquentielle qui s'arrête au **premier Left**. Les thunks `() => e` ne sont appelés que si les précédents ont réussi. Valeurs dans une slice préallouée. |
 | `DArray.map(xs, f)` | `out := make([]U, len(xs)); for i, x := range xs { out[i] = f(x) }` |
 | `DArray.coalescing(v)` | Le type est connu statiquement : `[]T{v}` si `v` n'est pas un tableau, `v` sinon. Pas de test à l'exécution. |
-| `DString.to(n)` pour un `number` | Conversion qui reproduit `${n}` de JS (pas `fmt.Sprint`, qui diffère sur `1e21`, `-0`, `NaN`, entiers) via un helper partagé. |
+| `DString.to(n)` pour un `number` | [Décidé] (projet 06) `NumberToString(n)` = `strconv.FormatFloat(n, 'f', -1, 64)`. Passé comme valeur → référence à `NumberToString`. Écarts : notation exponentielle de JS (≥ 1e21, < 1e-6), `Infinity`. |
 
 Quand une fonction DuploJS est passée **comme valeur** (par exemple `DString.to` donné à `map`), émettre une référence à un helper Go **instancié** sur le type concret, ou l'inliner dans la boucle si le handler de `map` sait le faire.
 
@@ -109,7 +112,7 @@ Faits du runtime : `rightAsyncPipe` attend chaque étape **dans l'ordre** ; `asy
 
 `print(x)` appelle `console.info(x)` côté Node : format `util.inspect`, pas du JSON. Pour l'Either, Node affiche les clés `'@duplojs/lang/kind/@DuplojsLangEither/…'`.
 
-**[Décidé] (projet 01)** `shard_dependencies.Print[T](v) T` affiche la valeur en JSON indenté (`json.NewEncoder(os.Stdout)`, `SetEscapeHTML(false)`, `SetIndent("", "  ")`) puis la retourne, comme `DCommon.print`. On s'appuie sur les tags `json` des variantes et sur les `MarshalJSON` de `JSNull`/`JSUndefined`, prévus par le boilerplate. On compare donc avec Node **sur la structure** (clés, valeurs, ordre) ; l'écart de format (`util.inspect` contre JSON) est une limite documentée. Reproduire `util.inspect` demanderait un formateur Go complet écrit avec les factories de l'AST, qui n'a pas de nœud « Go brut ». Un string seul est affiché entre guillemets en JSON, alors que Node l'affiche brut : à traiter quand un exercice le demande (06).
+**[Décidé] (projets 01, 06)** `shard_dependencies.Print[T](v) T` affiche une chaîne brute (`fmt.Println`, comme `console.info`), et toute autre valeur en JSON indenté (`json.NewEncoder(os.Stdout)`, `SetEscapeHTML(false)`, `SetIndent("", "  ")`) puis la retourne, comme `DCommon.print`. On s'appuie sur les tags `json` des variantes et sur les `MarshalJSON` de `JSNull`/`JSUndefined`, prévus par le boilerplate. On compare donc avec Node **sur la structure** (clés, valeurs, ordre) ; l'écart de format (`util.inspect` contre JSON) est une limite documentée. Reproduire `util.inspect` demanderait un formateur Go complet écrit avec les factories de l'AST, qui n'a pas de nœud « Go brut ».
 
 ## 8. Méthode de travail par exercice
 
