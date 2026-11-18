@@ -6,6 +6,7 @@ import { TsAST } from "@typescript";
 import * as DPattern from "@duplojs/lang/pattern";
 import { successExpressionHandler, successTypeHandler } from "./success";
 import { isRightExpressionHandler } from "./isRight";
+import { failExpressionHandler, failTypeHandler } from "./fail";
 import { unionTypeHandler } from "./union";
 import * as DArray from "@duplojs/lang/array";
 
@@ -45,6 +46,10 @@ export const duploJSEitherExpressionTransformer: Transformer<GoAST.Expression> =
 				),
 			),
 			DPattern.match(
+				DCommon.equal("fail"),
+				() => failExpressionHandler(node, context),
+			),
+			DPattern.match(
 				DCommon.equal("isRight"),
 				() => isRightExpressionHandler(node, context),
 			),
@@ -55,7 +60,7 @@ export const duploJSEitherExpressionTransformer: Transformer<GoAST.Expression> =
 	},
 );
 
-export const duploJSEitherTypeTransformer: Transformer<GoAST.GenericTypeReference> = createTransformer(
+export const duploJSEitherTypeTransformer: Transformer<GoAST.GenericTypeReference | GoAST.PackageTypeReference> = createTransformer(
 	async(node, context) => {
 		if (!TsAST.isTypeReferenceNode(node) && !TsAST.isImportTypeNode(node)) {
 			return context.notSupport();
@@ -77,6 +82,10 @@ export const duploJSEitherTypeTransformer: Transformer<GoAST.GenericTypeReferenc
 			DPattern.match(
 				DCommon.equal("Success"),
 				() => successTypeHandler(node, context),
+			),
+			DPattern.match(
+				DCommon.equal("Fail"),
+				() => failTypeHandler(context),
 			),
 			DPattern.otherwise(
 				() => context.notSupport(),

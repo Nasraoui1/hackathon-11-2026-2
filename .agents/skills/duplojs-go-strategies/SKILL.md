@@ -33,7 +33,7 @@ Quand un choix change, mettre à jour ce fichier avant le code : il sert de mém
 | `T[]` | `[]T` | [Proposé] | Slice, préallouée avec `make([]T, n)` quand la taille est connue. |
 | Tuple `[A, B, C]` homogène | `[3]T` | [Proposé] | Tableau Go de taille fixe : valeur, cardinalité conservée, pas d'allocation séparée. |
 | Tuple hétérogène | struct `{ V0 A; V1 B; … }` | [Proposé] | Position → champ, typage conservé. |
-| `null` / `undefined` | `shard_dependencies.JSNull` / `JSUndefined` | [Décidé] (boilerplate) | Types vides de taille nulle. |
+| `null` / `undefined` | `shard_dependencies.JSNull` / `JSUndefined` | [Décidé] (boilerplate) | Types vides de taille nulle. Un champ `undefined` porte le tag `omitzero` : il est omis du JSON comme avec `JSON.stringify` (projet 04, `EitherFail.Value`). |
 | Union de littéraux string (`"a" \| "b"`) | `string` | [Proposé] | Les informations d'Either restent des strings : comparaison rapide, rendu identique. |
 | `Promise<T>` | voir §6 | [Proposé] | — |
 
@@ -56,7 +56,7 @@ type EitherSuccess[T any] struct { Right JSNull; Information string; Value T; Su
 func (_ EitherSuccess[T]) IsRight() bool { return true }
 ```
 
-- Un type Either seul (`Success<T>`) garde son type concret (`EitherSuccess[T]`). Une union dont **tous** les membres sont des types Either devient `shard_dependencies.Either` (routeur `duploJSEitherUnionTypeTransformer`).
+- Variantes existantes : `EitherSuccess[T]` (`success`), `EitherFail` (`fail`, projet 04). Un type Either seul (`Success<T>`, `Fail`) garde son type concret. Une union dont **tous** les membres sont des types Either devient `shard_dependencies.Either` (routeur `duploJSEitherUnionTypeTransformer`).
 - Chaque variante est un type **défini** (pas un alias, sinon pas de méthode possible), avec ses tags `json`, et implémente `IsRight()` via `createIsRightMethod` (`either/sharedDependency.ts`).
 - `isRight(x)` → `x.IsRight()`. Pour lire la valeur typée d'une variante : assertion vers le type concret donné par le checker, ou type switch (`matchInformation`).
 - Pourquoi : Go convertit implicitement une variante vers l'interface, donc `return EitherSuccessOf(x)` compile sans connaître l'union. C'est la solution la plus simple.
@@ -77,7 +77,8 @@ Rendu (`print`) : voir §7.
   ```
   Les `before` de `a` et `b` restent **dans** leur branche. Le type `T` vient du checker.
 - **`&&` / `||`** : court-circuit à préserver. Si l'opérande droit a des `before`, le transformer binaire actuel les remonte avant l'opérande gauche, ce qui est faux. Il faut alors utiliser la même forme `if` que le ternaire. Sans `before` à droite, garder l'opérateur Go natif.
-- **Plusieurs `return`** (projet 04) : chaque `return` produit le type de retour unifié de la fonction (§3). Les `before` d'un `return` restent dans son bloc.
+- **Plusieurs `return`** : [Décidé] (projet 04) rien de spécifique. Le type de retour (annoté ou inféré) est une union Either, donc l'interface `Either`, et Go convertit implicitement chaque variante retournée. Les `before` d'un `return` restent dans son bloc.
+- **Opérateurs préfixes** : [Décidé] (projet 04) `-x`, `+x`, `!x` deviennent l'opérateur Go identique (`-1` est `-` appliqué à `1`). `~x` (int32 en JS), `++x` et `--x` sont refusés.
 - **Déstructuration de paramètre `([a, b, c]) => …`** : [Proposé] paramètre Go unique (`[3]float64` ou struct), puis `a := p[0]`… en tête de corps. Si la fonction est dépliée dans une boucle (§5), lier directement depuis l'élément courant.
 
 ## 5. Combinateurs DuploJS (dépliage)
