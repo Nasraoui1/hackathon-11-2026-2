@@ -11,6 +11,7 @@ import { stringLiteralTransformer } from "./stringLiteral";
 import { conditionalExpressionTransformer } from "./conditional";
 import { arrowFunctionTransformer } from "./arrowFunction";
 import { logicalExpressionTransformer } from "./logical";
+import { typeAssertionExpressionTransformer } from "./typeAssertion";
 
 export const expressionTransformers = DCommon.memo(
 	(): readonly Transformer<GoAST.Expression>[] => [
@@ -24,5 +25,6 @@ export const expressionTransformers = DCommon.memo(
 		conditionalExpressionTransformer,
 		arrowFunctionTransformer,
 		prefixUnaryExpressionTransformer,
+		typeAssertionExpressionTransformer,
 	],
 );

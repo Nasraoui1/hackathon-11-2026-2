@@ -27,7 +27,7 @@ Quand un choix change, mettre à jour ce fichier avant le code : il sert de mém
 
 | TypeScript / DuploJS | Go | Statut | Justification |
 |---|---|---|---|
-| `number` | `float64` | [Décidé] (projet 00) | IEEE 754 double, identique à JS. |
+| `number`, littéraux, unions de littéraux, nombre brandé `number & DNumber.Positive` | `float64` | [Décidé] (projet 00, `type/float.ts`) | IEEE 754 double, identique à JS. La contrainte DuploJS n'existe que dans les types. |
 | `string` | `string` | [Proposé] | Chaînes immuables des deux côtés. Attention : JS indexe en UTF-16, Go en octets ; ne pas traduire `.length`/indexation sans conversion. |
 | `boolean` | `bool` | [Proposé] | — |
 | `T[]` | `[]T` | [Proposé] | Slice, préallouée avec `make([]T, n)` quand la taille est connue. |
@@ -63,6 +63,8 @@ func (_ EitherSuccess[T]) IsRight() bool { return true }
 - Pourquoi : Go convertit implicitement une variante vers l'interface, donc `return EitherSuccessOf(x)` compile sans connaître l'union. C'est la solution la plus simple.
 - Coût accepté et documenté : allocation sur le tas à la conversion vers l'interface, appel dynamique pour `IsRight()`.
 - Alternative écartée (optimisation future) : une struct plate `Either[R, L]` sans allocation. Go n'infère pas `L` depuis le type de retour attendu, donc il faudrait calculer `R` et `L` avec le checker et instancier chaque constructeur.
+- **Passage à l'échelle** : [Décidé] ne jamais générer un type Go par union, ni une struct à deux paramètres `Either[R, L]`. Toute union Either, quel que soit le nombre de variantes ou de types de valeur, devient la même interface ; un nouveau constructeur DuploJS (`right`, `error`…) = une nouvelle variante via `createEitherMethods`, rien d'autre. Vérifié avec 5 variantes de 4 types de valeur différents.
+- **Unions mixtes** (valeur brute + variantes Either, ex. résultat de `unwrapRight`) : non prises en charge. Piste [Proposé] : `any` pour la variable, puis `x.(T)` à chaque lecture où le checker a rétréci le type (`if (isLeft(x)) return x;` puis `x` utilisé comme `string`).
 
 Rendu (`print`) : voir §7.
 
@@ -79,6 +81,7 @@ Rendu (`print`) : voir §7.
   Les `before` de `a` et `b` restent **dans** leur branche. Le type `T` vient du checker.
 - **`&&` / `||`** : [Décidé] (projet 06, `expression/logical.ts`, placé avant `binary` dans la liste) `t := left; if t { t = right }` (`if !t` pour `||`) : l'opérande droit et ses `before` ne sont évalués que si nécessaire. Le transformer binaire générique évaluait les deux opérandes.
 - **Fonction fléchée** : [Décidé] (projet 06, `expression/arrowFunction.ts`) `(p) => e` → `func(p T) R { return e }`. `T` et `R` viennent du checker (le source ne les écrit souvent pas). Pas de déstructuration ni d'`async`.
+- **`x as T`, `x satisfies T`, `x!`** : [Décidé] traduction de `x` seul (`expression/typeAssertion.ts`) : aucun effet à l'exécution.
 - **Type absent du source** : [Décidé] utiliser `transformCheckerType(type, location, context)` (`type/fromChecker.ts`) : `typeToTypeNode` du checker puis la liste des transformers de types.
 - **Plusieurs `return`** : [Décidé] (projet 04) rien de spécifique. Le type de retour (annoté ou inféré) est une union Either, donc l'interface `Either`, et Go convertit implicitement chaque variante retournée. Les `before` d'un `return` restent dans son bloc.
 - **Opérateurs préfixes** : [Décidé] (projet 04) `-x`, `+x`, `!x` deviennent l'opérateur Go identique (`-1` est `-` appliqué à `1`). `~x` (int32 en JS), `++x` et `--x` sont refusés.
