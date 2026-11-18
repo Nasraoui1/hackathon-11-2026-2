@@ -5,6 +5,9 @@ import type { GoAST } from "@go";
 import { TsAST } from "@typescript";
 import * as DPattern from "@duplojs/lang/pattern";
 import { successExpressionHandler, successTypeHandler } from "./success";
+import { isRightExpressionHandler } from "./isRight";
+import { unionTypeHandler } from "./union";
+import * as DArray from "@duplojs/lang/array";
 
 export const duploJSEitherDeclarationTransformer: Transformer<GoAST.Declaration> = createTransformer(
 	(_node, context) => context.notSupport(),
@@ -41,6 +44,10 @@ export const duploJSEitherExpressionTransformer: Transformer<GoAST.Expression> =
 					context,
 				),
 			),
+			DPattern.match(
+				DCommon.equal("isRight"),
+				() => isRightExpressionHandler(node, context),
+			),
 			DPattern.otherwise(
 				() => context.error(node),
 			),
@@ -75,5 +82,41 @@ export const duploJSEitherTypeTransformer: Transformer<GoAST.GenericTypeReferenc
 				() => context.notSupport(),
 			),
 		);
+	},
+);
+
+/**
+ * Routeur des unions : `A | B | ...` dont **tous** les membres sont des types
+ * du domaine Either. Une union mêlant d'autres types n'est pas prise en charge ici.
+ */
+export const duploJSEitherUnionTypeTransformer: Transformer<GoAST.PackageTypeReference> = createTransformer(
+	async(node, context) => {
+		if (!TsAST.isUnionTypeNode(node)) {
+			return context.notSupport();
+		}
+
+		const memberReferences = await DCommon.asyncPipe(
+			node.types,
+			DArray.map(
+				(member) => {
+					if (TsAST.isTypeReferenceNode(member)) {
+						return context.resolveReferenceModule(member.typeName, "@duplojs/lang", /^dist\/either\//);
+					}
+
+					if (TsAST.isImportTypeNode(member)) {
+						return context.resolveReferenceModule(member, "@duplojs/lang", /^dist\/either\//);
+					}
+
+					return DEither.none();
+				},
+			),
+			DCommon.promiseAll,
+		);
+
+		if (!DArray.every(memberReferences, DEither.isRight)) {
+			return context.notSupport();
+		}
+
+		return unionTypeHandler(context);
 	},
 );

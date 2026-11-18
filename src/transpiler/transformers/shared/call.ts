@@ -5,6 +5,7 @@ import * as DCommon from "@duplojs/lang/common";
 import { expressionTransformers } from "../expression";
 import * as DEither from "@duplojs/lang/either";
 import * as DArray from "@duplojs/lang/array";
+import { SymbolFlags } from "typescript/async";
 
 export const callExpressionTransformer: Transformer<GoAST.CallExpression> = createTransformer(
 	async(rawNode, context) => {
@@ -23,6 +24,17 @@ export const callExpressionTransformer: Transformer<GoAST.CallExpression> = crea
 		if (DEither.isLeft(callee)) {
 			return callee;
 		}
+
+		// Une déclaration de fonction (locale, importée ou membre d'un namespace) est
+		// immuable : l'évaluer avant ou après les arguments ne change rien. On l'appelle
+		// donc directement, ce qui laisse Go inférer ses paramètres génériques.
+		const { typeChecker } = context.transpilation;
+		const calleeSymbol = await typeChecker.getSymbolAtLocation(node.expression);
+		const calleeDeclarationSymbol = calleeSymbol && calleeSymbol.flags & SymbolFlags.Alias
+			? await typeChecker.getAliasedSymbol(calleeSymbol)
+			: calleeSymbol;
+		const isFunctionDeclaration = !!calleeDeclarationSymbol
+			&& !!(calleeDeclarationSymbol.flags & SymbolFlags.Function);
 
 		const functionVariableStatement = GoAST.createShortVariableDeclarationStatement({
 			identifier: context.generateIdentifier(),
@@ -78,11 +90,11 @@ export const callExpressionTransformer: Transformer<GoAST.CallExpression> = crea
 		return context.success({
 			before: DArray.concat(
 				callee.before,
-				[functionVariableStatement],
+				isFunctionDeclaration ? [] : [functionVariableStatement],
 				argumentsResult.before,
 			),
 			result: GoAST.createCallExpression({
-				callee: functionVariableStatement.identifier,
+				callee: isFunctionDeclaration ? callee.result : functionVariableStatement.identifier,
 				arguments: argumentsResult.arguments,
 			}),
 		});

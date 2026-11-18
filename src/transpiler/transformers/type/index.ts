@@ -4,11 +4,13 @@ import type { GoAST } from "@go";
 import { duploJSTypeTransformers } from "../duplojs";
 import { sharedTypeTransformers } from "../shared";
 import { float64TypeTransformer } from "./float";
+import { parenthesizedTypeTransformer } from "./parenthesized";
 
 export const typeTransformers = DCommon.memo(
 	(): readonly Transformer<GoAST.Type | GoAST.TypeReference>[] => [
 		...duploJSTypeTransformers.value,
 		...sharedTypeTransformers.value,
 		float64TypeTransformer,
+		parenthesizedTypeTransformer,
 	],
 );
