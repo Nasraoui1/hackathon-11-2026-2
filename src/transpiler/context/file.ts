@@ -10,11 +10,12 @@ export interface FileContext {
 	readonly dependencyFiles: Set<string & DPath.Absolute>;
 	readonly declarations: Set<GoAST.Declaration>;
 	readonly imports: Set<GoAST.ImportDeclaration>;
+	readonly unwrappedVariables: Set<string>;
 }
 
 export function createFileContext(sourceFile: TsAST.SourceFile) {
 	const currentFilePath = DCommon.pipe(
-		sourceFile.path,
+		sourceFile.path.startsWith("/") ? sourceFile.path : `/${sourceFile.path}`,
 		DPath.createAbsolute,
 		DEither.unwrapRight,
 	);
@@ -29,6 +30,7 @@ export function createFileContext(sourceFile: TsAST.SourceFile) {
 		dependencyFiles: new Set(),
 		declarations: new Set(),
 		imports: new Set(),
+		unwrappedVariables: new Set(),
 	};
 
 	return DEither.success(context);

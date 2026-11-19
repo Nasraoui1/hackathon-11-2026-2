@@ -3,6 +3,7 @@ import { GoAST } from "@go";
 import { createSharedDependency } from "@transformer";
 
 export const eitherTypeIdentifier = GoAST.createIdentifier("Either");
+export const eitherIsRightFunctionIdentifier = GoAST.createIdentifier("EitherIsRight");
 export const isRightMethodIdentifier = GoAST.createIdentifier("IsRight");
 export const getInformationMethodIdentifier = GoAST.createIdentifier("GetInformation");
 export const getValueMethodIdentifier = GoAST.createIdentifier("GetValue");
@@ -43,6 +44,32 @@ export const eitherDependency = DCommon.memo(
 							identifier: getValueMethodIdentifier,
 							arguments: [],
 							returnTypes: [GoAST.builtinTypeReferences.any],
+						}),
+					],
+				}),
+			}),
+			GoAST.createFunctionDeclaration({
+				identifier: eitherIsRightFunctionIdentifier,
+				generic: [],
+				arguments: [
+					GoAST.createFunctionArgument({
+						identifier: GoAST.createIdentifier("either"),
+						type: eitherTypeIdentifier,
+					}),
+				],
+				returnTypes: [GoAST.builtinTypeReferences.bool],
+				body: GoAST.createBlockStatement({
+					statements: [
+						GoAST.createReturnStatement({
+							values: [
+								GoAST.createCallExpression({
+									callee: GoAST.createSelectorExpression({
+										target: GoAST.createIdentifier("either"),
+										identifier: isRightMethodIdentifier,
+									}),
+									arguments: [],
+								}),
+							],
 						}),
 					],
 				}),

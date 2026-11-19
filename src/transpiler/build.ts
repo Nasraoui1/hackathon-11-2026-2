@@ -79,11 +79,13 @@ export function build(
 					return exit(mainFile, moduleFile);
 				}
 
+				const allSharedDeps = new Set([
+					...defaultSharedDependencies.value,
+					...context.sharedDependencies,
+				]);
+
 				const file = DCommon.pipe(
-					DGenerator.concat(
-						defaultSharedDependencies.value,
-						context.sharedDependencies,
-					),
+					allSharedDeps,
 					DGenerator.reduce(
 						DGenerator.reduceFrom<CreateFileParams>({
 							packageName: sharedDependencyPackageName,
@@ -118,7 +120,9 @@ export function build(
 				);
 			}
 
-			const sourceFile = await typescriptInstance.project.program.getSourceFile(path);
+			const normalizedPath = path.replace(/^\/([a-zA-Z]:)/, "$1");
+			const sourceFile = await typescriptInstance.project.program.getSourceFile(normalizedPath)
+				?? await typescriptInstance.project.program.getSourceFile(path);
 
 			if (!sourceFile) {
 				return exit(DEither.left("source-file-not-found", path));
@@ -141,7 +145,9 @@ export function build(
 
 			const sourcePackage = DCommon.pipe(
 				DEither.rightPipe(
-					DPath.createAbsolute(sourceFile.path),
+					DPath.createAbsolute(
+						sourceFile.path.startsWith("/") ? sourceFile.path : `/${sourceFile.path}`,
+					),
 					(sourcePath) => createSourcePackageLayout(typescriptInstance.projectWorkDirectory, sourcePath),
 				),
 				DEither.unwrapRight,

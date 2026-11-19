@@ -5,24 +5,59 @@ import * as DCommon from "@duplojs/lang/common";
 import * as DEither from "@duplojs/lang/either";
 import { type BuildContext } from "../../../../context/build";
 import { callExpressionTransformer } from "../../../shared";
+import { expressionTransformers } from "../../../expression";
 import { typeTransformers } from "../../../type";
+import { undefinedShardDependency } from "../../../../sharedDependency/defaults/undefined";
 import { eitherLeftDependency, leftFunctionIdentifier, leftTypeIdentifier } from "./sharedDependency";
 
 /**
  * `DEither.left("information", value)` → `shard_dependencies.EitherLeftOf("information", value)`.
- * Go infère `T` depuis `value`. La forme sans valeur, `left("information")`,
- * n'est pas prise en charge (la valeur serait `undefined`).
+ * `DEither.left("information")` → `shard_dependencies.EitherLeftOf("information", shard_dependencies.JSUndefined{})`.
  */
-export function leftExpressionHandler(
+export async function leftExpressionHandler(
 	node: TsAST.Node,
 	context: BuildContext,
 ) {
 	if (TsAST.isCallExpression(node)) {
-		if (node.arguments.length !== 2) {
-			return context.error(node, "left-requires-information-and-value");
+		if (node.arguments.length === 2) {
+			return context.transform(node, [callExpressionTransformer]);
 		}
 
-		return context.transform(node, [callExpressionTransformer]);
+		if (node.arguments.length === 1) {
+			const infoArg = node.arguments[0]!;
+			const transformedInfo = await DCommon.asyncPipe(
+				context.transform(infoArg, expressionTransformers.value),
+				DEither.unwrapRight,
+			);
+			if (DEither.isLeft(transformedInfo)) {
+				return transformedInfo;
+			}
+
+			const pkg = context.registerSharedDependency(eitherLeftDependency.value);
+			context.registerSharedDependency(undefinedShardDependency.value);
+
+			return context.success({
+				before: transformedInfo.before ?? [],
+				result: GoAST.createCallExpression({
+					callee: GoAST.createSelectorExpression({
+						target: pkg,
+						identifier: leftFunctionIdentifier,
+					}),
+					arguments: [
+						transformedInfo.result,
+						GoAST.createStructLiteral({
+							typeReference: GoAST.createPackageTypeReference({
+								packageName: pkg,
+								identifier: GoAST.createIdentifier("JSUndefined"),
+							}),
+							elements: [],
+						}),
+					],
+				}),
+			});
+		}
+
+		return context.error(node, "left-requires-information");
 	}
 
 	return context.success({
@@ -43,7 +78,22 @@ export async function leftTypeHandler(
 	const valueNode = node.typeArguments && DArray.at(node.typeArguments, 1);
 
 	if (!valueNode) {
-		return context.notSupport();
+		const pkg = context.registerSharedDependency(eitherLeftDependency.value);
+		context.registerSharedDependency(undefinedShardDependency.value);
+		return context.success({
+			result: GoAST.createGenericTypeReference({
+				typeReference: GoAST.createPackageTypeReference({
+					packageName: pkg,
+					identifier: leftTypeIdentifier,
+				}),
+				typeArguments: DCommon.cast([
+					GoAST.createPackageTypeReference({
+						packageName: pkg,
+						identifier: GoAST.createIdentifier("JSUndefined"),
+					}),
+				]),
+			}),
+		});
 	}
 
 	const value = await DCommon.asyncPipe(

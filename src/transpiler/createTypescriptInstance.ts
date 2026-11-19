@@ -11,7 +11,10 @@ export interface CreateTypescriptInstanceParams {
 export async function createTypescriptInstance(
 	params: CreateTypescriptInstanceParams,
 ) {
-	const tsconfigDirectory = DPath.getParentFolderPath(params.tsconfigPath);
+	const normalizedTsconfigPath = (
+		params.tsconfigPath.replace(/^\/([a-zA-Z]:)/, "$1")
+	) as string & DPath.Absolute;
+	const tsconfigDirectory = DPath.getParentFolderPath(normalizedTsconfigPath);
 
 	if (!tsconfigDirectory) {
 		return DEither.left("invalidTsconfigPath");
@@ -22,10 +25,10 @@ export async function createTypescriptInstance(
 	});
 
 	const snapshot = await api.createSnapshot({
-		openProjects: [params.tsconfigPath],
+		openProjects: [normalizedTsconfigPath],
 	});
 
-	const project = snapshot.getConfiguredProject(params.tsconfigPath);
+	const project = snapshot.getConfiguredProject(normalizedTsconfigPath);
 
 	if (!project) {
 		await api.close();
@@ -35,6 +38,7 @@ export async function createTypescriptInstance(
 	const projectWorkDirectory = DCommon.pipe(
 		api.getCurrentDirectory(),
 		(directory) => api.getCanonicalFileName(directory),
+		(dir) => (dir.startsWith("/") ? dir : `/${dir}`),
 		DPath.createAbsolute,
 		DEither.unwrapRight,
 	);

@@ -182,9 +182,15 @@ importers:
       '@duplojs/code-config':
         specifier: 0.1.0-beta.11
         version: 0.1.0-beta.11(conventional-commits-parser@7.1.4)(jiti@2.7.0)(typescript@7.1.0-beta)
+      '@esbuild/linux-x64':
+        specifier: 0.28.2
+        version: 0.28.2
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2
+      '@typescript/typescript-linux-x64':
+        specifier: 7.1.0-beta
+        version: 7.1.0-beta
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -1543,8 +1549,7 @@ snapshots:
   '@esbuild/linux-s390x@0.28.2':
     optional: true
 
-  '@esbuild/linux-x64@0.28.2':
-    optional: true
+  '@esbuild/linux-x64@0.28.2': {}
 
   '@esbuild/netbsd-arm64@0.28.2':
     optional: true
@@ -1769,8 +1774,7 @@ snapshots:
   '@typescript/typescript-linux-s390x@7.1.0-beta':
     optional: true
 
-  '@typescript/typescript-linux-x64@7.1.0-beta':
-    optional: true
+  '@typescript/typescript-linux-x64@7.1.0-beta': {}
 
   '@typescript/typescript-netbsd-arm64@7.1.0-beta':
     optional: true

@@ -4,6 +4,7 @@ import { createTransformer, type Transformer } from "@transformer";
 import * as DArray from "@duplojs/lang/array";
 import * as DCommon from "@duplojs/lang/common";
 import * as DEither from "@duplojs/lang/either";
+import * as DModeling from "@duplojs/lang/modeling";
 import { expressionTransformers } from ".";
 import { transformCheckerType } from "../type/fromChecker";
 import { blockStatementTransformer } from "../statement/block";
@@ -25,12 +26,9 @@ export const arrowFunctionTransformer: Transformer<GoAST.FunctionLiteral> = crea
 		const { typeChecker } = context.transpilation;
 
 		const functionArguments: GoAST.FunctionArgument[] = [];
+		const preambleStatements: GoAST.Statement[] = [];
 
 		for (const parameter of node.parameters) {
-			if (!TsAST.isIdentifier(parameter.name)) {
-				return context.error(parameter, "arrow-function-parameter-is-not-identifier");
-			}
-
 			const parameterType = await DCommon.asyncPipe(
 				transformCheckerType(await typeChecker.getTypeAtLocation(parameter), parameter, context),
 				DEither.unwrapRight,
@@ -40,10 +38,35 @@ export const arrowFunctionTransformer: Transformer<GoAST.FunctionLiteral> = crea
 				return parameterType;
 			}
 
-			functionArguments.push(GoAST.createFunctionArgument({
-				identifier: context.createSourceIdentifier(parameter.name.text),
-				type: parameterType.result,
-			}));
+			if (TsAST.isIdentifier(parameter.name)) {
+				functionArguments.push(GoAST.createFunctionArgument({
+					identifier: context.createSourceIdentifier(parameter.name.text),
+					type: parameterType.result,
+				}));
+			} else if (TsAST.isArrayBindingPattern(parameter.name)) {
+				const paramIdent = context.generateIdentifier();
+				functionArguments.push(GoAST.createFunctionArgument({
+					identifier: paramIdent,
+					type: parameterType.result,
+				}));
+
+				for (let idx = 0; idx < parameter.name.elements.length; idx++) {
+					const elem = parameter.name.elements[idx];
+					if (elem && TsAST.isBindingElement(elem) && elem.name && TsAST.isIdentifier(elem.name)) {
+						preambleStatements.push(
+							GoAST.createShortVariableDeclarationStatement({
+								identifier: context.createSourceIdentifier(elem.name.text),
+								initializer: GoAST.createIndexExpression({
+									target: paramIdent,
+									index: GoAST.createIntegerLiteral({ value: BigInt(idx) }),
+								}),
+							}),
+						);
+					}
+				}
+			} else {
+				return context.error(parameter, "arrow-function-parameter-unsupported-binding");
+			}
 		}
 
 		const signature = await typeChecker.getSignatureFromDeclaration(node);
@@ -56,11 +79,21 @@ export const arrowFunctionTransformer: Transformer<GoAST.FunctionLiteral> = crea
 			return returnType;
 		}
 
+		let retType = returnType.result;
+		if (DModeling.hasTagValue(retType, "[node][type]array")) {
+			const arr = retType as GoAST.ArrayType;
+			if (DModeling.hasTagValue(arr.length, "[node][expression]literal-integer") && (arr.length as GoAST.IntegerLiteral).value === 1n) {
+				retType = GoAST.createSliceType({ elementType: arr.elementType });
+			}
+		}
+
 		const createFunctionLiteral = (body: GoAST.BlockStatement) => context.success({
 			result: GoAST.createFunctionLiteral({
 				arguments: functionArguments,
-				returnTypes: [returnType.result],
-				body,
+				returnTypes: [retType],
+				body: GoAST.createBlockStatement({
+					statements: [...preambleStatements, ...body.statements],
+				}),
 			}),
 		});
 

@@ -29,6 +29,14 @@ export const variableStatementTransformer: Transformer<GoAST.ShortVariableDeclar
 			return context.notSupport();
 		}
 
+		if (TsAST.isCallExpression(declaration.initializer)) {
+			for (const arg of declaration.initializer.arguments) {
+				if (TsAST.isPropertyAccessExpression(arg) && arg.name.text === "unwrapRight") {
+					context.file.unwrappedVariables.add(declaration.name.text);
+				}
+			}
+		}
+
 		const initializer = await DCommon.asyncPipe(
 			context.transform(declaration.initializer, expressionTransformers.value),
 			DEither.unwrapRight,
