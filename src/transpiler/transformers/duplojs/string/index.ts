@@ -5,6 +5,9 @@ import { createTransformer, type Transformer } from "@transformer";
 import type { GoAST } from "@go";
 import { TsAST } from "@typescript";
 import { toExpressionHandler } from "./to";
+import { testExpressionHandler } from "./test";
+import { includesExpressionHandler } from "./includes";
+import { lengthExpressionHandler } from "./length";
 
 /**
  * Routeur du domaine `@duplojs/lang/string`.
@@ -36,6 +39,18 @@ export const duploJSStringExpressionTransformer: Transformer<GoAST.Expression> =
 			DPattern.match(
 				DCommon.equal("to"),
 				() => toExpressionHandler(node, context),
+			),
+			DPattern.match(
+				DCommon.equal("test"),
+				() => testExpressionHandler(node, context),
+			),
+			DPattern.match(
+				DCommon.equal("includes"),
+				() => includesExpressionHandler(node, context),
+			),
+			DPattern.match(
+				DCommon.equal("length"),
+				() => lengthExpressionHandler(node, context),
 			),
 			DPattern.otherwise(
 				() => context.error(node),
