@@ -45,33 +45,42 @@ Vérifié : une fonction qui retourne **5 variantes** (`left("too-short", number
 
 Le coût de cette généralité est documenté : chaque conversion vers l’interface peut allouer sur le tas, et `GetValue()` renvoie `any` (boxing puis assertion `.(T)` à l’exécution). L’alternative sans allocation, une struct plate par union, demanderait de calculer chaque union avec le checker et retomberait dans le problème de la génération par combinaison.
 
-**Limite identifiée.** Les unions **mixtes**, où une valeur brute côtoie des variantes Either (par exemple `string | Left<…> | Error<null>`, le résultat de `DEither.unwrapRight`), ne sont pas encore traduites. Le rétrécissement de type qui suit (`if (isLeft(x)) return x;` puis `x` utilisé comme `string`) n’a pas d’équivalent direct en Go, où une variable garde son type statique. Stratégie envisagée : représenter l’union par `any`, puis convertir avec une assertion `x.(T)` à chaque lecture où le checker a rétréci le type.
+**Unions mixtes (projet 11).** `DEither.unwrapRight` produit une union où une valeur brute côtoie des variantes Either (`string | Left<…> | Error<null>`), puis `if (isLeft(x)) return x;` rétrécit `x` en `string`. En Go, une variable garde son type statique : la variable reste donc un `Either`, et à chaque lecture où le checker a rétréci son type, le transpileur émet `x.GetValue().(string)`. Les variables concernées sont suivies par leur symbole TypeScript.
 
 ## Suivi des exercices
 
 | Exercice | Responsable | État | Documentation |
 |---|---|---|---|
-| 00 (exemple) | Aziz | Correction : le Go fourni ne compilait pas (générique non instancié) | [01/README](projects/01/README.md) |
-| 01 — union, `if`, `print` | Aziz | Vérifié, sortie identique à Node | [projects/01](projects/01/README.md) |
-| 02 — fonction en argument | Louis | À faire | |
-| 03 — `pipe` | Louis | À faire | |
-| 04 — `fail`, plusieurs `return` | Aziz | `add.ts` vérifié ; `index.ts` dépend du `pipe` (03) | [projects/04](projects/04/README.md) |
-| 05 — `whenIsRightOtherwise`, `map` | Louis | À faire | |
-| 06 — `left`, ternaire, `matchInformation` | Aziz | Partie propre vérifiée ; `index.ts` dépend du `pipe` (03, 05) | [projects/06](projects/06/README.md) |
-| 07 — `rightPipe` | Louis | À faire | |
-| 08 — tuples, déstructuration | Lucas | À faire | |
-| 09 — `group` | Lucas | À faire | |
-| 10 — asynchronisme | Lucas | À faire | |
+| 00 (exemple) | Aziz | Correction : le Go fourni ne compilait pas (générique non instancié). Sortie identique à Node | [01/README](projects/01/README.md) |
+| 01 — union, `if`, `print` | Aziz | Sortie identique à Node | [projects/01](projects/01/README.md) |
+| 02 — fonction en argument | Louis-Martin | Sortie identique à Node | À rédiger |
+| 03 — `pipe` | Louis-Martin | Sortie identique à Node | À rédiger |
+| 04 — `fail`, plusieurs `return` | Aziz, Louis-Martin (`pipe`) | Sortie identique à Node | [projects/04](projects/04/README.md) |
+| 05 — `whenIsRightOtherwise`, `map` | Louis-Martin | Sortie identique à Node | À rédiger |
+| 06 — `left`, ternaire, `matchInformation` | Aziz, Louis-Martin (`pipe`) | Sortie identique à Node | [projects/06](projects/06/README.md) |
+| 07 — `rightPipe` | Louis-Martin | Sortie identique à Node | À rédiger |
+| 08 — tuples, déstructuration | Louis-Martin | Sortie identique à Node | À rédiger |
+| 09 — `group` | Louis-Martin | Sortie identique à Node | À rédiger |
+| 10 — asynchronisme | Louis-Martin | Sortie identique à Node | À rédiger |
+| 11 — `unwrapRight`, `isLeft`, regex (exemple du cours) | Louis-Martin | Sortie identique à Node | À rédiger |
+
+« Sortie identique à Node » : le Go compile, passe `go vet`, et sa sortie est identique octet pour octet à celle de Node lorsque Node affiche en JSON (voir Reproduction).
 
 Chaque README d’exercice suit la même structure : problématique, solution (Go réellement produit et justification), variations étudiées, résultats observés, limites.
 
 ## Performance et mémoire
 
-Rien n’a été mesuré à ce stade. Observations et hypothèses à vérifier (`go build -gcflags=-m`, `go test -bench . -benchmem`) :
+Mesures sur une machine (`go test -bench -benchmem`, Go 1.27.4 ; Node 22.19, 5 millions d’appels après chauffe, médiane de 3 runs). À prendre comme un ordre de grandeur.
 
-- Les variantes Either sont des structs passées par valeur. Les marques (`JSNull`, `JSUndefined`) sont des types de taille nulle et ne coûtent aucun octet.
-- La conversion vers l’interface `Either` et `GetValue()` peuvent provoquer des allocations : c’est le compromis assumé pour la généralité.
-- Les temporaires `Generated_N` produits par le transpileur sont des variables locales que le compilateur Go élimine ou garde en registre. Hypothèse non vérifiée.
+| Appel de `add` | Node | Go | Allocations Go |
+|---|---|---|---|
+| Renvoie `Success<number>` (type concret) | 464 ns | 0,49 ns | 0 |
+| Renvoie une union, cas succès | 485 ns | 21,5 ns | 1 (32 octets) |
+| Renvoie une union, cas `left` | 171 ns | 18,1 ns | 1 (24 octets) |
+
+- La conversion vers l’interface `Either` alloue sur le tas : `go build -gcflags=-m` l’indique (`escapes to heap`). C’est le prix de la représentation choisie ; une struct plate sur les chemins chauds serait la piste d’optimisation.
+- `add` est inlinable (`-gcflags=-m=2` : coût 18, seuil 80). Supprimer les variables temporaires inutiles a fait passer ce coût de 33 à 18.
+- Les marques `JSNull` et `JSUndefined` sont des structs vides : 0 octet.
 
 ## Reproduction
 
@@ -85,11 +94,13 @@ node_modules/.bin/tsx projects/01/index.ts   # sortie de référence Node
 pnpm test:types && pnpm test:lint
 ```
 
-Scripts disponibles : `build:00`, `build:01`, `build:04`, `build:06`.
+Scripts disponibles : `build:00` à `build:11`.
+
+Pour comparer octet par octet, faire afficher Node en JSON avec un module préchargé qui remplace `console.info` et `console.log` par `JSON.stringify(v, null, 2)` (chaînes affichées brutes), puis `node --import tsx --import ./json-console.mjs projects/XX/index.ts` et `diff` avec la sortie de `go run .`.
 
 Sous Windows, deux contournements **locaux, non versionnés** sont nécessaires :
 
-- Les chemins `DPath` (`/C:/…`) doivent être convertis pour l’API TypeScript (`C:/…`), sinon le build échoue avec `missingProject`.
+- Les chemins `DPath` (`/C:/…`) doivent être convertis pour l’API TypeScript (`C:/…`), sinon le build échoue avec `missingProject`. Un patch local est fourni à l’équipe (`git apply windows-paths-fix.patch`).
 - `pnpm test:lint` ne fonctionne pas : `tsgolint.js` n’est pas exécutable sous Windows. Lancer le lint sous Linux, macOS ou WSL.
 
 ## Rendu

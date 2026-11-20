@@ -45,7 +45,7 @@ Trois éléments ont été ajoutés :
 
 ## Résultats observés
 
-Le `index.ts` du projet est celui du projet 03 avec `add(-1, 2)`. Il utilise `DCommon.pipe`, `DEither.whenIsRight` et `DArray.coalescing`, traités dans les projets 02 et 03. Tant que ces projets ne sont pas intégrés, `pnpm build:04` s’arrête sur `DCommon.pipe(...)` (`transformation-error`).
+Le `index.ts` du projet est celui du projet 03 avec `add(-1, 2)`. Il utilise `DCommon.pipe`, `DEither.whenIsRight` et `DArray.coalescing`, traités dans les projets 02 et 03. Depuis l’intégration de ces projets, `pnpm build:04` transpile le projet complet : le Go compile, passe `go vet`, et sa sortie est identique à celle de Node (affichée en JSON).
 
 `add.ts` a été vérifié avec un `index.ts` réduit (`print(add(-1, 2))`, `print(add(1, 2))`). Le Go compile, `go vet` ne signale rien, et la sortie Go est **identique octet pour octet** à `JSON.stringify(valeur, null, 2)` côté Node :
 
@@ -61,6 +61,5 @@ Node (`util.inspect`) affiche en plus `value: undefined`. Le format JSON n’a p
 
 ## Limites
 
-- Le build complet de `index.ts` dépend des projets 02 et 03.
 - Allocation : chaque `return` convertit une variante vers l’interface, ce qui peut l’allouer sur le tas. `EitherFail` ne contient que des champs de taille nulle et un `string` constant ; le coût n’est pas mesuré.
 - `-0` : le JSON de Go affiche `-0`, comme `console.log` de Node, alors que `JSON.stringify(-0)` affiche `0` (vérifié). La comparaison avec `JSON.stringify` n’est donc pas exacte pour `-0` (non rencontré ici).

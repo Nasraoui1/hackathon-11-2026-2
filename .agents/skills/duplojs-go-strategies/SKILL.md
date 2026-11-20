@@ -1,6 +1,6 @@
 ---
 name: duplojs-go-strategies
-description: Règles de l'équipe pour traduire les constructions DuploJS/TypeScript des exercices 01 à 10 en Go performant et fidèle — représentations Go, sémantique à préserver, méthode de travail par exercice, validation et documentation. À utiliser avant de concevoir ou d'implémenter un transformer pour un exercice de `projects/`, et pour rédiger sa documentation.
+description: Règles de l'équipe pour traduire les constructions DuploJS/TypeScript des projets 00 à 11 en Go performant et fidèle — représentations Go, sémantique à préserver, méthode de travail par exercice, validation et documentation. À utiliser avant de concevoir ou d'implémenter un transformer pour un exercice de `projects/`, et pour rédiger sa documentation.
 ---
 
 # Stratégies de traduction DuploJS → Go
@@ -28,16 +28,17 @@ Quand un choix change, mettre à jour ce fichier avant le code : il sert de mém
 | TypeScript / DuploJS | Go | Statut | Justification |
 |---|---|---|---|
 | `number`, littéraux, unions de littéraux, nombre brandé `number & DNumber.Positive` | `float64` | [Décidé] (projet 00, `type/float.ts`) | IEEE 754 double, identique à JS. La contrainte DuploJS n'existe que dans les types. |
-| `string` | `string` | [Proposé] | Chaînes immuables des deux côtés. Attention : JS indexe en UTF-16, Go en octets ; ne pas traduire `.length`/indexation sans conversion. |
-| `boolean` | `bool` | [Proposé] | — |
-| `T[]` | `[]T` | [Proposé] | Slice, préallouée avec `make([]T, n)` quand la taille est connue. |
-| Tuple `[A, B, C]` homogène | `[3]T` | [Proposé] | Tableau Go de taille fixe : valeur, cardinalité conservée, pas d'allocation séparée. |
-| Tuple hétérogène | struct `{ V0 A; V1 B; … }` | [Proposé] | Position → champ, typage conservé. |
+| `string` | `string` | [Décidé] | Chaînes immuables des deux côtés. Attention : JS compte en unités UTF-16, Go en octets ou en runes (voir `DString.length`, §11). |
+| `boolean` | `bool` | [Proposé] | Pas encore de transformer de type : une fonction qui **renvoie** `boolean` n'est pas traduite (`BooleanKeyword` → `notfound-transformer`). À ajouter (`type/bool.ts`). |
+| `T[]` | `[]T` | [Décidé] (`type/array.ts`, `expression/arrayLiteral.ts`) | Slice ; préallouée avec `make([]T, n)` quand la taille est connue (`map`, `group`). |
+| Tuple `[A, B, C]` | `shard_dependencies.Tuple3[A, B, C]` (`Tuple2` à `TupleN`, champs `V0`, `V1`…) | [Décidé] (projet 08, `type/tuple.ts`, `type/tupleSharedDependency.ts`) | Struct générique : taille et type de chaque position conservés ; `MarshalJSON` rend un tableau JSON comme `JSON.stringify`. Construction via `Tuple3Of(…)`. |
 | `null` / `undefined` | `shard_dependencies.JSNull` / `JSUndefined` | [Décidé] (boilerplate) | Types vides de taille nulle. Un champ `undefined` porte le tag `omitzero` : il est omis du JSON comme avec `JSON.stringify` (projet 04, `EitherFail.Value`). |
 | Types textuels : `string`, littéral, template, string brandé `string & X`, et leurs unions | `string` | [Décidé] (projet 06, `type/string.ts`) | La marque et le littéral n'existent que dans les types ; TypeScript a déjà vérifié la valeur. |
-| `Promise<T>` | voir §6 | [Proposé] | — |
+| `Promise<T>` | `T` | [Décidé] (projet 10, `type/promise.ts`) | Exécution synchrone, voir §6. Écart à corriger : `Promise` est reconnu par son nom textuel, pas par son symbole. |
+| `null` en expression, `undefined` en type | `JSNull{}`, `JSUndefined` | [Décidé] (`expression/nullLiteral.ts`, `type/null.ts`, `type/undefined.ts`) | — |
+| `readonly T[]` et autres opérateurs de type | type de l'opérande | [Décidé] (`type/typeOperator.ts`) | `readonly` n'existe pas à l'exécution. |
 
-Généricité : une fonction générique Go **doit être instanciée** lorsqu'elle est utilisée comme valeur (`EitherSuccessOf[float64]`). Les arguments de type se lisent dans le checker (type de l'appel / signature résolue), jamais dans le texte source. Le Go actuel du projet 00 ne compile pas pour cette raison (`cannot use generic function … without instantiation`) : à corriger en premier.
+Généricité : une fonction générique Go **doit être instanciée** lorsqu'elle est utilisée comme valeur (`EitherSuccessOf[float64]`). Les arguments de type se lisent dans le checker, jamais dans le texte source. Le projet 00 fourni ne compilait pas pour cette raison ; corrigé en appelant directement les fonctions déclarées (§4), ce qui laisse Go inférer les génériques.
 
 ## 3. Représentation de l'`Either` — décision centrale
 
@@ -56,21 +57,22 @@ type EitherSuccess[T any] struct { Right JSNull; Information string; Value T; Su
 func (_ EitherSuccess[T]) IsRight() bool { return true }
 ```
 
-- Variantes existantes : `EitherSuccess[T]` (`success`), `EitherFail` (`fail`, projet 04), `EitherLeft[T]` (`left(information, value)`, projet 06). Un type Either seul (`Success<T>`, `Fail`) garde son type concret. Une union dont **tous** les membres sont des types Either devient `shard_dependencies.Either` (routeur `duploJSEitherUnionTypeTransformer`).
-- Chaque variante est un type **défini** (pas un alias, sinon pas de méthode possible), avec ses tags `json`, et implémente `IsRight()` via `createIsRightMethod` (`either/sharedDependency.ts`).
+- Variantes existantes : `EitherSuccess[T]` (`success`), `EitherFail` (`fail`, projet 04), `EitherLeft[T]` (`left(information, value)` et `left(information)`, projets 06 et 11), `EitherRight[T]` (`right(information, value)`, projet 11), `EitherError[T]` (`error(value)`, projet 11). Un type Either seul (`Success<T>`, `Fail`) garde son type concret. Une union dont **tous** les membres sont des types Either devient `shard_dependencies.Either` (routeur `duploJSEitherUnionTypeTransformer`).
+- Chaque variante est un type **défini** (pas un alias, sinon pas de méthode possible), avec ses tags `json`, et implémente l'interface via `createEitherMethods` (`either/sharedDependency.ts`).
 - L'interface porte trois méthodes, générées pour chaque variante par `createEitherMethods` : `IsRight() bool`, `GetInformation() string`, `GetValue() any` (projet 06).
-- `isRight(x)` → `x.IsRight()`. Pour lire la valeur typée d'une union : `x.GetValue().(T)`, où `T` est le type attendu donné par le checker (par exemple le paramètre du callback). Coût : boxing de la valeur et assertion à l'exécution.
+- `isRight(x)` → `x.IsRight()` ; `isLeft(x)` → `!x.IsRight()` (`either/isLeft/`). Pour lire la valeur typée d'une union : `x.GetValue().(T)`, où `T` est le type attendu donné par le checker (par exemple le paramètre du callback). Coût : boxing de la valeur et assertion à l'exécution.
 - Pourquoi : Go convertit implicitement une variante vers l'interface, donc `return EitherSuccessOf(x)` compile sans connaître l'union. C'est la solution la plus simple.
 - Coût accepté et documenté : allocation sur le tas à la conversion vers l'interface, appel dynamique pour `IsRight()`.
 - Alternative écartée (optimisation future) : une struct plate `Either[R, L]` sans allocation. Go n'infère pas `L` depuis le type de retour attendu, donc il faudrait calculer `R` et `L` avec le checker et instancier chaque constructeur.
 - **Passage à l'échelle** : [Décidé] ne jamais générer un type Go par union, ni une struct à deux paramètres `Either[R, L]`. Toute union Either, quel que soit le nombre de variantes ou de types de valeur, devient la même interface ; un nouveau constructeur DuploJS (`right`, `error`…) = une nouvelle variante via `createEitherMethods`, rien d'autre. Vérifié avec 5 variantes de 4 types de valeur différents.
-- **Unions mixtes** (valeur brute + variantes Either, ex. résultat de `unwrapRight`) : non prises en charge. Piste [Proposé] : `any` pour la variable, puis `x.(T)` à chaque lecture où le checker a rétréci le type (`if (isLeft(x)) return x;` puis `x` utilisé comme `string`).
+- **Détecter un type Either** : [Décidé] `isEitherType` (`either/isEitherType.ts`) résout le module (`@duplojs/lang`, `dist/either/`) ou les clés de kind `@DuplojsLangEither/*`, jamais le texte du type.
+- **`unwrapRight` et rétrécissement** : [Décidé] (projet 11) `unwrapRight` est un passthrough : la variable reste un `Either`. Sa déclaration est enregistrée dans `context.file.unwrappedVariables` (un `Set` de **symboles** TypeScript, `statement/variable.ts` et `common/pipe/`). Quand l'identifiant est lu à un endroit où le checker a rétréci son type à autre chose qu'un Either (après `if (isLeft(x)) return x;`), `common/identifier.ts` émet `x.GetValue().(T)`, `T` donné par le checker.
 
 Rendu (`print`) : voir §7.
 
 ## 4. Expressions et instructions
 
-- **Appel de fonction** : [Décidé] (projets 00, 01) arguments évalués dans l'ordre et stockés dans des temporaires. La fonction appelée n'est stockée dans un temporaire **que si elle n'est pas une déclaration de fonction** : une déclaration (locale, importée, membre de namespace) est immuable, donc on l'appelle directement, ce qui laisse Go inférer ses génériques.
+- **Appel de fonction** : [Décidé] (projets 00, 01) arguments évalués dans l'ordre et stockés dans des temporaires. La fonction est appelée directement (sans temporaire) si c'est une déclaration de fonction, un identifiant ou un sélecteur de package (`shared/call.ts`) : Go infère alors les génériques et le code est plus court (coût d'inlining de `add` passé de 33 à 18). Écart connu : une **variable locale** contenant une fonction et réassignée pendant l'évaluation des arguments serait lue trop tard ; cas jugé marginal.
 - **`const x = e`** : [Décidé] (projet 01) `Sourced_x := e`, type inféré par Go. Une seule déclaration, nom simple.
 - **`if` / `else`** : [Décidé] (projet 01) condition traduite avec ses `before` placés avant le `if` ; chaque branche est un bloc traduit indépendamment, et une instruction seule est enveloppée dans un bloc avec ses `before`.
 - **Ternaire `c ? a : b`** : [Décidé] (projet 06, `expression/conditional.ts`) déclaration du résultat puis `if/else`, et non un helper `ternary(c, a, b)` qui évaluerait les deux branches :
@@ -79,28 +81,32 @@ Rendu (`print`) : voir §7.
   if c { /* before de a */ t = a } else { /* before de b */ t = b }
   ```
   Les `before` de `a` et `b` restent **dans** leur branche. Le type `T` vient du checker.
-- **`&&` / `||`** : [Décidé] (projet 06, `expression/logical.ts`, placé avant `binary` dans la liste) `t := left; if t { t = right }` (`if !t` pour `||`) : l'opérande droit et ses `before` ne sont évalués que si nécessaire. Le transformer binaire générique évaluait les deux opérandes.
-- **Fonction fléchée** : [Décidé] (projet 06, `expression/arrowFunction.ts`) `(p) => e` → `func(p T) R { return e }`. `T` et `R` viennent du checker (le source ne les écrit souvent pas). Pas de déstructuration ni d'`async`.
+- **`&&` / `||`** : [Décidé] (projet 06, `expression/logical.ts`, placé avant `binary` dans la liste) si l'opérande droit n'a **aucun** `before`, l'opérateur Go natif (qui court-circuite déjà) ; sinon `t := left; if t { <before>; t = right }` (`if !t` pour `||`). Le transformer binaire fourni sortait les `before` de droite avant l'opérateur.
+- **Fonction fléchée** : [Décidé] (projet 06, `expression/arrowFunction.ts`) `(p) => e` → `func(p T) R { return e }`. `T` et `R` viennent du checker (le source ne les écrit souvent pas). `async` : traité comme synchrone (§6).
 - **`x as T`, `x satisfies T`, `x!`** : [Décidé] traduction de `x` seul (`expression/typeAssertion.ts`) : aucun effet à l'exécution.
 - **Type absent du source** : [Décidé] utiliser `transformCheckerType(type, location, context)` (`type/fromChecker.ts`) : `typeToTypeNode` du checker puis la liste des transformers de types.
 - **Plusieurs `return`** : [Décidé] (projet 04) rien de spécifique. Le type de retour (annoté ou inféré) est une union Either, donc l'interface `Either`, et Go convertit implicitement chaque variante retournée. Les `before` d'un `return` restent dans son bloc.
 - **Opérateurs préfixes** : [Décidé] (projet 04) `-x`, `+x`, `!x` deviennent l'opérateur Go identique (`-1` est `-` appliqué à `1`). `~x` (int32 en JS), `++x` et `--x` sont refusés.
-- **Déstructuration de paramètre `([a, b, c]) => …`** : [Proposé] paramètre Go unique (`[3]float64` ou struct), puis `a := p[0]`… en tête de corps. Si la fonction est dépliée dans une boucle (§5), lier directement depuis l'élément courant.
+- **Déstructuration de paramètre** : [Décidé] (projet 08, `expression/arrowFunction.ts`) un paramètre Go unique puis des déclarations en tête de corps : `([a, b]) =>` sur un tuple → `a := p.V0`, `b := p.V1` ; sur un tableau → `a := p[0]` ; `({ x, y }) =>` → paramètre struct anonyme, `x := p.X`.
+- **`await e`** : [Décidé] (`expression/await.ts`) traduit par `e` (§6). **`(e)`** : traduit par `e` (`expression/parenthesized.ts`). **Déclarations de type TS** (`type`, `interface`) : ignorées à l'émission (`transformSourceFile.ts`).
 
 ## 5. Combinateurs DuploJS (dépliage)
 
 Les formes **data-first** `f(input, …)` et **data-last** `f(…)(input)` (curryfiée, utilisée dans `pipe`) doivent être reconnues toutes les deux. Le runtime choisit la forme selon le nombre d'arguments ; le transformer décide de la même façon, d'après la signature résolue par le checker.
 
-| DuploJS | Go déplié [Proposé] |
+| DuploJS | Go généré [Décidé] (`transformers/duplojs/`) |
 |---|---|
-| `pipe(x, f, g)` | `t1 := f(x); t2 := g(t1)`, chaque étape étant elle-même dépliée si possible. |
-| `whenIsRight(e, f)` | `if e.IsRight { out = f(e.Right) } else { out = e }`. Le type de `out` est l'union donnée par le checker. |
-| `whenIsRightOtherwise(e, f, g)` | `if e.IsRight { out = f(e.Right) } else { out = g(e) }` |
-| `rightPipe(x, f1, f2…)` | Chaîne de `if !acc.IsRight { goto/retour anticipé }`. Une étape qui renvoie une valeur non-Either passe telle quelle, et le résultat final est enveloppé dans `success` (cf. runtime). |
+| `pipe(x, f, g)` | Déroulé étape par étape (`common/pipe/`) : chaque étape curryfiée connue (`whenIsRight`, `whenIsRightOtherwise`, `map`, `DString.test`, `unwrapRight`) est dépliée en place ; les autres appels passent par `callable.ts`. |
+| `whenIsRight(e, f)` | `var out any; if e.IsRight() { out = f(e.GetValue().(T)) } else { out = e }`. Limite : `out` est typé `any` (§11). |
+| `whenIsRightOtherwise(e, f, g)` | `var out R; if e.IsRight() { out = f(e.GetValue().(T)) } else { out = g(e) }`, `R` lu dans la signature de `g`. |
+| `rightPipe(x, f1, f2…)` / `rightAsyncPipe` | `var acc Either = x; if acc.IsRight() { acc = f1(acc.GetValue().(T)); if acc.IsRight() { … } }` : `if` imbriqués, arrêt au premier Left. Les étapes en ligne sont des fonctions anonymes appelées sur place (inlining par Go non vérifié). |
 | `matchInformation(e, {k: f})` | [Décidé] (projet 06) entrée et callbacks évalués dans l'ordre, puis `var out T; switch e.GetInformation() { case "k": out = f(e.GetValue().(P)) }` ; l'argument n'est passé que si le callback a un paramètre. |
-| `group([e1, e2…])` | Boucle séquentielle qui s'arrête au **premier Left**. Les thunks `() => e` ne sont appelés que si les précédents ont réussi. Valeurs dans une slice préallouée. |
-| `DArray.map(xs, f)` | `out := make([]U, len(xs)); for i, x := range xs { out[i] = f(x) }` |
-| `DArray.coalescing(v)` | Le type est connu statiquement : `[]T{v}` si `v` n'est pas un tableau, `v` sinon. Pas de test à l'exécution. |
+| `group([e1, e2…])` / `asyncGroup` | Déroulé séquentiel (`either/group/`) : slice préalloué `make([]T, n)`, chaque élément évalué seulement si les précédents ont réussi, arrêt au **premier Left**. |
+| `DArray.map(xs, f)` | `ArrayMap(xs, f)` en shared dependency : `make([]R, len(xs))` puis boucle, sans `append`. |
+| `DArray.coalescing(v)` | `ArrayCoalescing(v)` (`array/coalescing/`) : `[]T{v}`. |
+| `DString.test(s, /re/)` | `var re = regexp.MustCompile("…")` **au niveau du package**, puis `re.MatchString(s)`. |
+| `DString.includes(s, x)` | `strings.Contains(s, x)`. |
+| `DString.length(s)` | `float64(utf8.RuneCountInString(s))`. Écart : JS compte en unités UTF-16 (un emoji vaut 2 en JS, 1 ici) ; à corriger. |
 | `DString.to(n)` pour un `number` | [Décidé] (projet 06) `NumberToString(n)` = `strconv.FormatFloat(n, 'f', -1, 64)`. Passé comme valeur → référence à `NumberToString`. Écarts : notation exponentielle de JS (≥ 1e21, < 1e-6), `Infinity`. |
 
 Quand une fonction DuploJS est passée **comme valeur** (par exemple `DString.to` donné à `map`), émettre une référence à un helper Go **instancié** sur le type concret, ou l'inliner dans la boucle si le handler de `map` sait le faire.
@@ -109,7 +115,7 @@ Quand une fonction DuploJS est passée **comme valeur** (par exemple `DString.to
 
 Faits du runtime : `rightAsyncPipe` attend chaque étape **dans l'ordre** ; `asyncGroup` appelle les thunks **un par un** et s'arrête au premier Left, sans appeler les suivants ; `asyncPipe` attend chaque étape.
 
-**[Proposé]** Traduire `async`/`await` par une exécution **synchrone** : une fonction `async` qui retourne `Promise<T>` devient une fonction Go qui retourne `T`, et `await e` devient `e`. Justification : l'ordre des effets et l'arrêt au premier échec sont exactement préservés, sans goroutine ni channel. Lancer les calculs de `asyncGroup` en goroutines **changerait le comportement**, puisque des calculs seraient exécutés après un échec. Limites à documenter : une vraie concurrence (I/O, `Promise.all`), un `await` dans une boucle avec des effets entrelacés, l'ordre micro-tâches / macro-tâches et le `await` au top-level à traduire dans `init`/`main`.
+**[Décidé] (projet 10)** Traduire `async`/`await` par une exécution **synchrone** : une fonction `async` qui retourne `Promise<T>` devient une fonction Go qui retourne `T`, et `await e` devient `e`. Justification : l'ordre des effets et l'arrêt au premier échec sont exactement préservés, sans goroutine ni channel. Lancer les calculs de `asyncGroup` en goroutines **changerait le comportement**, puisque des calculs seraient exécutés après un échec. Limites à documenter : une vraie concurrence (I/O, `Promise.all`), un `await` dans une boucle avec des effets entrelacés, l'ordre micro-tâches / macro-tâches et le `await` au top-level à traduire dans `init`/`main`.
 
 ## 7. Sortie observable (`DCommon.print`)
 
@@ -162,7 +168,27 @@ Le README racine résume : membres (noms, prénoms, classes), stratégies transv
 
 ## 10. Environnement (pièges connus)
 
-- **Windows** : le build échoue avec `missingProject`, car les chemins `DPath` sont de la forme `/C:/…` alors que l'API TypeScript attend `C:/…`. Il faut un correctif **local, non versionné** : convertir les chemins à chaque échange avec l'API TypeScript (`createTypescriptInstance.ts`, `build.ts`, `context/file.ts`, `resolvedReference.ts`). Linux et macOS ne sont pas concernés.
+- **Windows** : le build échoue avec `missingProject`, car les chemins `DPath` sont de la forme `/C:/…` alors que l'API TypeScript attend `C:/…`. Il faut un correctif **local, non versionné** : convertir les chemins à chaque échange avec l'API TypeScript (`createTypescriptInstance.ts`, `build.ts`, `context/file.ts`, `resolvedReference.ts`), disponible en patch (`windows-paths-fix.patch`, à appliquer avec `git apply`, jamais à commiter). Linux et macOS ne sont pas concernés.
 - **Lint sous Windows** : `pnpm test:lint` échoue (`tsgolint.js` n'est pas un exécutable Win32, puis le plugin `@stylistic` n'est pas résolu). Lancer le lint sous Linux, macOS ou WSL avant de fusionner.
 - **pnpm 12 sous Windows** : si `pnpm` échoue avec « …\node_modules\pnpm\pnpm n'est pas reconnu », les shims `.CMD` de `%LOCALAPPDATA%\pnpm\.tools\pnpm\12.18.0\bin` doivent appeler `node_modules\@pnpm\exe.win32-x64\pnpm.exe`.
 - `go.mod` généré déclare `go 1.27.4` : au premier `go run`, Go télécharge cette toolchain (lent la première fois).
+
+## 11. État vérifié et limites connues
+
+État de `main` après fusion de la PR n°1 :
+
+- **Fidélité** : les 12 projets (00 à 11) compilent, passent `go vet` et produisent une sortie **identique octet pour octet** à Node. Méthode : précharger côté Node un module qui remplace `console.info` et `console.log` par `JSON.stringify(v, null, 2)` (chaînes affichées brutes), lancer `node --import tsx --import <module> projects/XX/index.ts`, puis `diff` avec la sortie de `go run .`.
+- **Performance mesurée** (`go test -bench -benchmem`, Go 1.27.4 ; Node 22.19, 5 millions d'appels, médiane de 3 runs, une machine) : `add` qui renvoie un type concret, 0,49 ns et 0 allocation (Node : 464 ns) ; `add` qui renvoie une union `Either`, 18 à 21,5 ns et **1 allocation** de 24 à 32 octets (Node : 171 à 485 ns). `go build -gcflags=-m` confirme l'échappement vers le tas à la conversion vers l'interface. Coût d'inlining de `add` : 18.
+
+Limites connues, à garder dans la documentation et la soutenance :
+
+| Limite | Conséquence | Piste |
+|---|---|---|
+| Union → interface | 1 allocation par valeur d'union | Struct plate sur les chemins chauds |
+| Résultat de `whenIsRight` | typé `any`, le type précis est perdu | Calculer l'union avec le checker |
+| `DString.length` | runes au lieu d'unités UTF-16 | Compter en UTF-16 |
+| `print` | JSON au lieu du format `util.inspect` | Formateur Go dédié |
+| `boolean` en retour de fonction | non traduit | Transformer de type `bool` |
+| Concurrence réelle | `Promise.all`, I/O en parallèle non couverts | Goroutines quand l'ordre ne compte pas |
+| `Promise` | reconnu par son nom textuel | Résoudre le symbole |
+| Windows | correctif de chemins local requis | Intégrer la conversion dans le dépôt |

@@ -107,7 +107,7 @@ Non pris en charge (erreur explicite) : `left(information)` sans valeur ; `match
 
 ## Résultats observés
 
-Le `index.ts` du projet calcule aussi `newResult` avec `DCommon.pipe`, `whenIsRightOtherwise`, `DArray.map` et `DString.to` passé comme valeur. Ces éléments relèvent des projets 03 et 05. Tant que ces projets ne sont pas intégrés, `pnpm build:06` s’arrête sur ce `pipe`.
+Le `index.ts` du projet calcule aussi `newResult` avec `DCommon.pipe`, `whenIsRightOtherwise`, `DArray.map` et `DString.to` passé comme valeur. Ces éléments relèvent des projets 03 et 05. Depuis l’intégration de ces projets, `pnpm build:06` transpile le projet complet : le Go compile, passe `go vet`, et sa sortie est identique à celle de Node (affichée en JSON).
 
 La partie propre au projet 06 a été vérifiée avec un `index.ts` réduit (même `add.ts`, même `matchInformation`, `print(message)`). Le Go compile, `go vet` ne signale rien, et la sortie est `un opérande est négatif`, comme la seconde ligne de Node. Les 7 sorties du jeu de variations sont **identiques octet pour octet** à celles de Node (`JSON.stringify` pour les objets, texte brut pour les chaînes).
 
