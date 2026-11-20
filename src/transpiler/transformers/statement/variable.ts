@@ -29,6 +29,23 @@ export const variableStatementTransformer: Transformer<GoAST.ShortVariableDeclar
 			return context.notSupport();
 		}
 
+		if (TsAST.isCallExpression(declaration.initializer)) {
+			for (const arg of declaration.initializer.arguments) {
+				if (TsAST.isPropertyAccessExpression(arg) || TsAST.isIdentifier(arg)) {
+					const modRef = await DCommon.asyncPipe(
+						context.resolveReferenceModule(arg, "@duplojs/lang", /^dist\/either\//),
+						DEither.unwrapRight,
+					);
+					if (!DEither.isLeft(modRef) && modRef.exportName === "unwrapRight") {
+						const sym = await context.transpilation.typeChecker.getSymbolAtLocation(declaration.name);
+						if (sym) {
+							context.file.unwrappedVariables.add(sym);
+						}
+					}
+				}
+			}
+		}
+
 		const initializer = await DCommon.asyncPipe(
 			context.transform(declaration.initializer, expressionTransformers.value),
 			DEither.unwrapRight,

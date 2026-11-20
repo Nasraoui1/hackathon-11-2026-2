@@ -21,7 +21,7 @@ import { expressionTransformers } from ".";
  * comme en JS.
  * Limite : `a || b` sur des valeurs non booléennes (valeur par défaut en JS) n'est pas traduit.
  */
-export const logicalExpressionTransformer: Transformer<GoAST.Identifier> = createTransformer(
+export const logicalExpressionTransformer: Transformer<GoAST.Expression> = createTransformer(
 	async(node, context) => {
 		if (
 			!TsAST.isBinaryExpression(node)
@@ -51,12 +51,25 @@ export const logicalExpressionTransformer: Transformer<GoAST.Identifier> = creat
 			return right;
 		}
 
+		const isAnd = node.operatorToken.kind === TsAST.SyntaxKind.AmpersandAmpersandToken;
+
+		// Si le membre droit n'a aucune instruction préalable (pas d'effet de bord à préparer),
+		// émettre directement l'expression binaire Go sans variable temporaire ni if.
+		if (right.before.length === 0) {
+			return context.success({
+				before: left.before,
+				result: GoAST.createBinaryExpression({
+					operator: isAnd ? "&&" : "||",
+					left: left.result,
+					right: right.result,
+				}),
+			});
+		}
+
 		const result = GoAST.createShortVariableDeclarationStatement({
 			identifier: context.generateIdentifier(),
 			initializer: left.result,
 		});
-
-		const isAnd = node.operatorToken.kind === TsAST.SyntaxKind.AmpersandAmpersandToken;
 
 		return context.success({
 			before: DArray.concat(
@@ -66,7 +79,10 @@ export const logicalExpressionTransformer: Transformer<GoAST.Identifier> = creat
 					GoAST.createIfStatement({
 						condition: isAnd
 							? result.identifier
-							: GoAST.createUnaryExpression({ operator: "!", operand: result.identifier }),
+							: GoAST.createUnaryExpression({
+								operator: "!",
+								operand: result.identifier,
+							}),
 						body: GoAST.createBlockStatement({
 							statements: DArray.concat(
 								right.before,
