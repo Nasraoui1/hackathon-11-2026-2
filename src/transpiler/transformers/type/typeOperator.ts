@@ -5,7 +5,10 @@ import { typeTransformers } from ".";
 
 export const typeOperatorTransformer: Transformer<GoAST.Type | GoAST.TypeReference> = createTransformer(
 	async(node, context) => {
-		if (!TsAST.isTypeOperatorNode(node)) {
+		if (
+			!TsAST.isTypeOperatorNode(node)
+			|| node.operator !== TsAST.SyntaxKind.ReadonlyKeyword
+		) {
 			return context.notSupport();
 		}
 

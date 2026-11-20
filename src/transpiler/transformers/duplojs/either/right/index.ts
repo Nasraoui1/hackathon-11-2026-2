@@ -24,7 +24,10 @@ export async function rightExpressionHandler(
 		}
 
 		if (node.arguments.length === 1) {
-			const infoArg = node.arguments[0]!;
+			const [infoArg] = node.arguments;
+			if (!infoArg) {
+				return context.error(node, "right-missing-information-argument");
+			}
 			const transformedInfo = await DCommon.asyncPipe(
 				context.transform(infoArg, expressionTransformers.value),
 				DEither.unwrapRight,

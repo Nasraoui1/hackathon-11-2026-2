@@ -93,17 +93,21 @@ export function build(
 							declarations: [],
 							init: [],
 						}),
-						({ item, lastValue, nextWithObject }) => nextWithObject(
-							lastValue,
-							{
-								imports: DArray.concat(lastValue.imports, item.imports),
-								declarations: DArray.concat(
-									lastValue.declarations,
-									item.declarations,
-								),
-								init: DArray.concat(lastValue.init, item.init),
-							},
-						),
+						({ item, lastValue, nextWithObject }) => {
+							const existingPaths = new Set(lastValue.imports.map((imp) => imp.path));
+							const uniqueImports = item.imports.filter((imp) => !existingPaths.has(imp.path));
+							return nextWithObject(
+								lastValue,
+								{
+									imports: DArray.concat(lastValue.imports, uniqueImports),
+									declarations: DArray.concat(
+										lastValue.declarations,
+										item.declarations,
+									),
+									init: DArray.concat(lastValue.init, item.init),
+								},
+							);
+						},
 					),
 					createFile,
 				);
@@ -120,9 +124,7 @@ export function build(
 				);
 			}
 
-			const normalizedPath = path.replace(/^\/([a-zA-Z]:)/, "$1");
-			const sourceFile = await typescriptInstance.project.program.getSourceFile(normalizedPath)
-				?? await typescriptInstance.project.program.getSourceFile(path);
+			const sourceFile = await typescriptInstance.project.program.getSourceFile(path);
 
 			if (!sourceFile) {
 				return exit(DEither.left("source-file-not-found", path));
@@ -145,9 +147,7 @@ export function build(
 
 			const sourcePackage = DCommon.pipe(
 				DEither.rightPipe(
-					DPath.createAbsolute(
-						sourceFile.path.startsWith("/") ? sourceFile.path : `/${sourceFile.path}`,
-					),
+					DPath.createAbsolute(sourceFile.path),
 					(sourcePath) => createSourcePackageLayout(typescriptInstance.projectWorkDirectory, sourcePath),
 				),
 				DEither.unwrapRight,

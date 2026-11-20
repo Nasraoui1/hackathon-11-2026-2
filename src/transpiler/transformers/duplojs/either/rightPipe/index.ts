@@ -1,12 +1,9 @@
 import * as DCommon from "@duplojs/lang/common";
-import * as DArray from "@duplojs/lang/array";
 import * as DEither from "@duplojs/lang/either";
 import { GoAST } from "@go";
 import { TsAST } from "@typescript";
-import { SignatureKind } from "typescript/async";
 import type { BuildContext } from "../../../../context/build";
 import { expressionTransformers } from "../../../expression";
-import { transformCheckerType } from "../../../type/fromChecker";
 import {
 	eitherDependency,
 	eitherTypeIdentifier,
@@ -25,7 +22,10 @@ export async function rightPipeExpressionHandler(
 
 	const { typeChecker } = context.transpilation;
 
-	const initArg = node.arguments[0]!;
+	const [initArg] = node.arguments;
+	if (!initArg) {
+		return context.error(node, "rightPipe-missing-init-argument");
+	}
 	const transformedInit = await DCommon.asyncPipe(
 		context.transform(initArg, expressionTransformers.value),
 		DEither.unwrapRight,
@@ -57,11 +57,17 @@ export async function rightPipeExpressionHandler(
 	// pour chaque étape en séquence
 	let currentIfTarget = beforeStatements;
 
-	for (let i = 1; i < node.arguments.length; i++) {
-		const stepNode = node.arguments[i]!;
+	for (let stepIndex = 1; stepIndex < node.arguments.length; stepIndex++) {
+		const stepNode = node.arguments[stepIndex];
+		if (!stepNode) {
+			return context.error(node, "rightPipe-missing-step-argument");
+		}
 
 		// Résolution du type attendu par l'étape courante
-		const prevArg = node.arguments[i - 1]!;
+		const prevArg = node.arguments[stepIndex - 1];
+		if (!prevArg) {
+			return context.error(node, "rightPipe-missing-prev-argument");
+		}
 		const prevType = await typeChecker.getTypeAtLocation(prevArg);
 		const rightValueType = await getEitherRightValueType(prevType, stepNode, context);
 

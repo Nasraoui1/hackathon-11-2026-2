@@ -74,7 +74,10 @@ export const eitherErrorDependency = DCommon.memo(() => {
 									elements: [
 										GoAST.createKeyedElement({
 											key: GoAST.createIdentifier("Left"),
-											value: GoAST.createStructLiteral({ typeReference: nullType, elements: [] }),
+											value: GoAST.createStructLiteral({
+												typeReference: nullType,
+												elements: [],
+											}),
 										}),
 										GoAST.createKeyedElement({
 											key: GoAST.createIdentifier("Information"),
@@ -86,7 +89,10 @@ export const eitherErrorDependency = DCommon.memo(() => {
 										}),
 										GoAST.createKeyedElement({
 											key: GoAST.createIdentifier("Error"),
-											value: GoAST.createStructLiteral({ typeReference: nullType, elements: [] }),
+											value: GoAST.createStructLiteral({
+												typeReference: nullType,
+												elements: [],
+											}),
 										}),
 									],
 								}),

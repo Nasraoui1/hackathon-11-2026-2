@@ -13,19 +13,23 @@ import {
 	isRightMethodIdentifier,
 } from "../sharedDependency";
 import { eitherSuccessDependency, successFunctionIdentifier } from "../success/sharedDependency";
+import { tupleSharedDependency } from "../../../type/tupleSharedDependency";
 import { getEitherRightValueType, invokeCallable } from "../../callable";
 
 export async function groupExpressionHandler(
 	node: TsAST.Node,
 	context: BuildContext,
-	isAsync = false,
+	_isAsync = false,
 ) {
 	if (!TsAST.isCallExpression(node) || node.arguments.length < 1) {
 		return context.notSupport();
 	}
 
 	const { typeChecker } = context.transpilation;
-	const arrayArg = node.arguments[0]!;
+	const [arrayArg] = node.arguments;
+	if (!arrayArg) {
+		return context.error(node, "group-missing-argument");
+	}
 
 	const eitherPkg = context.registerSharedDependency(eitherDependency.value);
 	const successPkg = context.registerSharedDependency(eitherSuccessDependency.value);
@@ -37,14 +41,17 @@ export async function groupExpressionHandler(
 
 	// Déterminer le type de la valeur Right attendue
 	const nodeType = await typeChecker.getTypeAtLocation(node);
-	let rightType = await getEitherRightValueType(nodeType, node, context);
+	const rightType = await getEitherRightValueType(nodeType, node, context);
 
-	let elemType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.float64;
+	let elemType: GoAST.Type | GoAST.TypeReference | undefined = undefined;
 	if (rightType) {
 		if (DModeling.hasTagValue(rightType, "[node][type]slice")) {
 			elemType = (rightType as GoAST.SliceType).elementType;
 		} else if (DModeling.hasTagValue(rightType, "[node][type]array")) {
 			elemType = (rightType as GoAST.ArrayType).elementType;
+		} else if (DModeling.hasTagValue(rightType, "[node]type-reference-generic")) {
+			const genRef = rightType as GoAST.GenericTypeReference;
+			elemType = genRef.typeArguments[0] as GoAST.Type;
 		} else {
 			elemType = rightType;
 		}
@@ -60,22 +67,45 @@ export async function groupExpressionHandler(
 		}
 	}
 
+	if (!elemType) {
+		return context.error(node, "group-cannot-determine-element-type");
+	}
+
 	// Cas A : arrayArg est un ArrayLiteralExpression
 	if (TsAST.isArrayLiteralExpression(arrayArg)) {
 		const count = arrayArg.elements.length;
+		const isTuple = count >= 2 && count <= 8;
 		const valsVar = context.generateIdentifier();
 		const resVar = context.generateIdentifier();
 		const okVar = context.generateIdentifier();
 
+		// Résolution des types par élément pour le tuple
+		const stepElemTypes: (GoAST.Type | GoAST.TypeReference)[] = [];
+		const valVars: GoAST.Identifier[] = [];
+		for (let i = 0; i < count; i++) {
+			const elemNode = arrayArg.elements[i];
+			valVars.push(context.generateIdentifier());
+			let stepType: GoAST.Type | GoAST.TypeReference = elemType;
+			if (elemNode) {
+				const elemTypeAtLoc = await typeChecker.getTypeAtLocation(elemNode);
+				const sigs = await typeChecker.getSignaturesOfType(elemTypeAtLoc, SignatureKind.Call);
+				if (sigs.length > 0 && sigs[0]) {
+					const retType = await typeChecker.getReturnTypeOfSignature(sigs[0]);
+					const rType = await getEitherRightValueType(retType, elemNode, context);
+					if (rType) {
+						stepType = rType;
+					}
+				} else {
+					const rType = await getEitherRightValueType(elemTypeAtLoc, elemNode, context);
+					if (rType) {
+						stepType = rType;
+					}
+				}
+			}
+			stepElemTypes.push(stepType);
+		}
+
 		const beforeStatements: GoAST.Statement[] = [
-			GoAST.createShortVariableDeclarationStatement({
-				identifier: valsVar,
-				initializer: GoAST.createCallExpression({
-					callee: GoAST.createIdentifier("make"),
-					typeArgument: GoAST.createSliceType({ elementType: elemType }),
-					arguments: [GoAST.createIntegerLiteral({ value: BigInt(count) })],
-				}),
-			}),
 			GoAST.createVariableDeclarationZeroValue({
 				identifier: resVar,
 				typeReference: eitherTypeRef,
@@ -86,11 +116,40 @@ export async function groupExpressionHandler(
 			}),
 		];
 
+		if (isTuple) {
+			for (let idx = 0; idx < count; idx++) {
+				const valId = valVars[idx];
+				const stType = stepElemTypes[idx];
+				if (valId && stType) {
+					beforeStatements.push(
+						GoAST.createVariableDeclarationZeroValue({
+							identifier: valId,
+							typeReference: stType,
+						}),
+					);
+				}
+			}
+		} else {
+			beforeStatements.unshift(
+				GoAST.createShortVariableDeclarationStatement({
+					identifier: valsVar,
+					initializer: GoAST.createCallExpression({
+						callee: GoAST.createIdentifier("make"),
+						typeArgument: GoAST.createSliceType({ elementType: elemType }),
+						arguments: [GoAST.createIntegerLiteral({ value: BigInt(count) })],
+					}),
+				}),
+			);
+		}
+
 		let currentTarget = beforeStatements;
 
-		for (let i = 0; i < count; i++) {
-			const elem = arrayArg.elements[i]!;
-			let stepExpr: GoAST.Expression;
+		for (let itemIndex = 0; itemIndex < count; itemIndex++) {
+			const elem = arrayArg.elements[itemIndex];
+			if (!elem) {
+				return context.error(arrayArg, "group-array-literal-missing-element");
+			}
+			let stepExpr: GoAST.Expression = GoAST.createIdentifier("");
 			const stepBefore: GoAST.Statement[] = [];
 
 			const elemTypeAtLoc = await typeChecker.getTypeAtLocation(elem);
@@ -127,14 +186,17 @@ export async function groupExpressionHandler(
 				}),
 			);
 
+			const currentStepType = stepElemTypes[itemIndex] ?? elemType;
+			const targetAssign = isTuple && valVars[itemIndex]
+				? valVars[itemIndex]!
+				: GoAST.createIndexExpression({
+					target: valsVar,
+					index: GoAST.createIntegerLiteral({ value: BigInt(itemIndex) }),
+				});
+
 			const elseStatements: GoAST.Statement[] = [
 				GoAST.createAssignmentStatement({
-					targets: DCommon.cast([
-						GoAST.createIndexExpression({
-							target: valsVar,
-							index: GoAST.createIntegerLiteral({ value: BigInt(i) }),
-						}),
-					]),
+					targets: DCommon.cast([targetAssign]),
 					values: DCommon.cast([
 						GoAST.createTypeAssertionExpression({
 							target: GoAST.createCallExpression({
@@ -144,7 +206,7 @@ export async function groupExpressionHandler(
 								}),
 								arguments: [],
 							}),
-							typeReference: elemType,
+							typeReference: currentStepType,
 						}),
 					]),
 				}),
@@ -182,6 +244,18 @@ export async function groupExpressionHandler(
 			currentTarget = elseStatements;
 		}
 
+		let successValExpr: GoAST.Expression = valsVar;
+		if (isTuple) {
+			const tuplePkg = context.registerSharedDependency(tupleSharedDependency.value);
+			successValExpr = GoAST.createCallExpression({
+				callee: GoAST.createSelectorExpression({
+					target: tuplePkg,
+					identifier: GoAST.createIdentifier(`Tuple${count}Of`),
+				}),
+				arguments: valVars,
+			});
+		}
+
 		beforeStatements.push(
 			GoAST.createIfStatement({
 				condition: okVar,
@@ -195,7 +269,7 @@ export async function groupExpressionHandler(
 										target: successPkg,
 										identifier: successFunctionIdentifier,
 									}),
-									arguments: [valsVar],
+									arguments: [successValExpr],
 								}),
 							]),
 						}),

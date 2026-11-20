@@ -76,10 +76,6 @@ await DSCommand.exec(
 			),
 		);
 
-		if (DEither.isLeft(result)) {
-			console.error("BUILD_FAILED:", JSON.stringify(result, null, 2));
-		}
-
 		void DEither.unwrapRightOrThrow(result);
 	},
 );

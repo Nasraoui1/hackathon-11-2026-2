@@ -3,6 +3,7 @@ import * as DEither from "@duplojs/lang/either";
 import * as DPath from "@duplojs/lang/path";
 import type { GoAST } from "@go";
 import type { TsAST } from "@typescript";
+import type { Symbol } from "typescript/async";
 
 export interface FileContext {
 	readonly sourceFile: TsAST.SourceFile;
@@ -10,12 +11,12 @@ export interface FileContext {
 	readonly dependencyFiles: Set<string & DPath.Absolute>;
 	readonly declarations: Set<GoAST.Declaration>;
 	readonly imports: Set<GoAST.ImportDeclaration>;
-	readonly unwrappedVariables: Set<string>;
+	readonly unwrappedVariables: Set<Symbol>;
 }
 
 export function createFileContext(sourceFile: TsAST.SourceFile) {
 	const currentFilePath = DCommon.pipe(
-		sourceFile.path.startsWith("/") ? sourceFile.path : `/${sourceFile.path}`,
+		sourceFile.path,
 		DPath.createAbsolute,
 		DEither.unwrapRight,
 	);

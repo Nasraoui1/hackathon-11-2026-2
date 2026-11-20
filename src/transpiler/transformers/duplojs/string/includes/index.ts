@@ -17,8 +17,10 @@ export async function includesExpressionHandler(
 		GoAST.createImportDeclaration({ path: "strings" }),
 	);
 
-	const strArg = node.arguments[0]!;
-	const subArg = node.arguments[1]!;
+	const [strArg, subArg] = node.arguments;
+	if (!strArg || !subArg) {
+		return context.error(node, "includes-missing-arguments");
+	}
 
 	const transformedStr = await DCommon.asyncPipe(
 		context.transform(strArg, expressionTransformers.value),

@@ -14,7 +14,11 @@ import {
 	getValueMethodIdentifier,
 	isRightMethodIdentifier,
 } from "../../either/sharedDependency";
-import { arrayMapDependency, arrayMapFunctionIdentifier } from "../../array/map/sharedDependency";
+import {
+	arrayMapDependency,
+	arrayMapFunctionIdentifier,
+	arrayMapIndexFunctionIdentifier,
+} from "../../array/map/sharedDependency";
 import { transformCheckerType } from "../../../type/fromChecker";
 
 export async function pipeExpressionHandler(
@@ -27,7 +31,10 @@ export async function pipeExpressionHandler(
 
 	const { typeChecker } = context.transpilation;
 
-	const initArg = node.arguments[0]!;
+	const [initArg] = node.arguments;
+	if (!initArg) {
+		return context.error(node, "pipe-missing-init-argument");
+	}
 	const transformedInit = await DCommon.asyncPipe(
 		context.transform(initArg, expressionTransformers.value),
 		DEither.unwrapRight,
@@ -39,256 +46,370 @@ export async function pipeExpressionHandler(
 	let currentExpr: GoAST.Expression = transformedInit.result;
 	const beforeStatements: GoAST.Statement[] = [...(transformedInit.before ?? [])];
 
-	// Si init n'est pas déjà un identifiant, on l'assigne à une variable locale intermédiaire
-	if (!DModeling.hasTagValue(currentExpr, "[node]identifier")) {
-		const initVar = context.generateIdentifier();
-		beforeStatements.push(
-			GoAST.createShortVariableDeclarationStatement({
-				identifier: initVar,
-				initializer: currentExpr,
-			}),
-		);
-		currentExpr = initVar;
-	}
-
-	for (let i = 1; i < node.arguments.length; i++) {
-		const stepNode = node.arguments[i]!;
+	for (let stepIndex = 1; stepIndex < node.arguments.length; stepIndex++) {
+		const stepNode = node.arguments[stepIndex];
+		if (!stepNode) {
+			return context.error(node, "pipe-missing-step-argument");
+		}
 
 		// Détection DEither.unwrapRight : passthrough en Go
-		if (
-			TsAST.isPropertyAccessExpression(stepNode)
-			&& stepNode.name.text === "unwrapRight"
-		) {
-			if (node.parent && TsAST.isVariableDeclaration(node.parent) && TsAST.isIdentifier(node.parent.name)) {
-				context.file.unwrappedVariables.add(node.parent.name.text);
+		if (TsAST.isPropertyAccessExpression(stepNode) || TsAST.isIdentifier(stepNode)) {
+			const modRef = await DCommon.asyncPipe(
+				context.resolveReferenceModule(stepNode, "@duplojs/lang", /^dist\/either\//),
+				DEither.unwrapRight,
+			);
+			if (!DEither.isLeft(modRef) && modRef.exportName === "unwrapRight") {
+				if (node.parent && TsAST.isVariableDeclaration(node.parent) && TsAST.isIdentifier(node.parent.name)) {
+					const sym = await typeChecker.getSymbolAtLocation(node.parent.name);
+					if (sym) {
+						context.file.unwrappedVariables.add(sym);
+					}
+				}
+				continue;
 			}
-			continue;
 		}
 
 		// Détection appel currying : stepNode est un CallExpression
 		if (TsAST.isCallExpression(stepNode)) {
 			const callee = stepNode.expression;
-			let calleeName = "";
-			if (TsAST.isPropertyAccessExpression(callee)) {
-				calleeName = callee.name.text;
-			} else if (TsAST.isIdentifier(callee)) {
-				calleeName = callee.text;
-			}
-
-			// whenIsRight(fn) dans pipe
-			if (calleeName === "whenIsRight" && stepNode.arguments.length === 1) {
-				const fnArg = stepNode.arguments[0]!;
-				const eitherVar = currentExpr;
-
-				const prevType = await typeChecker.getTypeAtLocation(node.arguments[i - 1]!);
-				const rightValueType = await getEitherRightValueType(prevType, stepNode, context);
-
-				let argExpr: GoAST.Expression = eitherVar;
-				if (rightValueType) {
-					argExpr = GoAST.createTypeAssertionExpression({
-						target: GoAST.createCallExpression({
-							callee: GoAST.createSelectorExpression({
-								target: eitherVar,
-								identifier: getValueMethodIdentifier,
-							}),
-							arguments: [],
-						}),
-						typeReference: rightValueType,
-					});
-				}
-
-				const invoked = await DCommon.asyncPipe(
-					invokeCallable(fnArg, argExpr, context),
+			if (TsAST.isPropertyAccessExpression(callee) || TsAST.isIdentifier(callee)) {
+				const modRef = await DCommon.asyncPipe(
+					context.resolveReferenceModule(callee, "@duplojs/lang"),
 					DEither.unwrapRight,
 				);
-				if (DEither.isLeft(invoked)) {
-					return context.error(stepNode, "pipe-whenIsRight-error");
-				}
 
-				const resultVar = context.generateIdentifier();
+				if (!DEither.isLeft(modRef)) {
+					const { exportName, entry } = modRef;
 
-				let resultType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.any;
-				const fnType = await typeChecker.getTypeAtLocation(fnArg);
-				const fnRightType = await getEitherRightValueType(fnType, fnArg, context);
-				if (fnRightType !== undefined) {
-					resultType = GoAST.createPackageTypeReference({
-						packageName: context.registerSharedDependency(eitherDependency.value),
-						identifier: eitherTypeIdentifier,
-					});
-				}
+					// whenIsRight(fn) dans pipe
+					if (exportName === "whenIsRight" && entry.startsWith("dist/either/") && stepNode.arguments.length === 1) {
+						const [fnArg] = stepNode.arguments;
+						if (!fnArg) {
+							return context.error(stepNode, "pipe-whenIsRight-missing-argument");
+						}
+						const eitherVar = currentExpr;
 
-				const resultVarDecl = GoAST.createVariableDeclarationZeroValue({
-					identifier: resultVar,
-					typeReference: resultType,
-				});
+						const prevArg = node.arguments[stepIndex - 1];
+						if (!prevArg) {
+							return context.error(node, "pipe-missing-prev-argument");
+						}
+						const prevType = await typeChecker.getTypeAtLocation(prevArg);
+						const rightValueType = await getEitherRightValueType(prevType, stepNode, context);
 
-				const ifStmt = GoAST.createIfStatement({
-					condition: GoAST.createCallExpression({
-						callee: GoAST.createSelectorExpression({
-							target: eitherVar,
-							identifier: isRightMethodIdentifier,
-						}),
-						arguments: [],
-					}),
-					body: GoAST.createBlockStatement({
-						statements: [
-							...invoked.before,
-							GoAST.createAssignmentStatement({
-								targets: DCommon.cast([resultVar]),
-								values: DCommon.cast([invoked.result]),
+						let argExpr: GoAST.Expression = eitherVar;
+						if (rightValueType) {
+							argExpr = GoAST.createTypeAssertionExpression({
+								target: GoAST.createCallExpression({
+									callee: GoAST.createSelectorExpression({
+										target: eitherVar,
+										identifier: getValueMethodIdentifier,
+									}),
+									arguments: [],
+								}),
+								typeReference: rightValueType,
+							});
+						}
+
+						const invoked = await DCommon.asyncPipe(
+							invokeCallable(fnArg, argExpr, context),
+							DEither.unwrapRight,
+						);
+						if (DEither.isLeft(invoked)) {
+							return context.error(stepNode, "pipe-whenIsRight-error");
+						}
+
+						const resultVar = context.generateIdentifier();
+
+						let resultType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.any;
+						const fnType = await typeChecker.getTypeAtLocation(fnArg);
+						const fnRightType = await getEitherRightValueType(fnType, fnArg, context);
+						if (fnRightType !== undefined) {
+							resultType = GoAST.createPackageTypeReference({
+								packageName: context.registerSharedDependency(eitherDependency.value),
+								identifier: eitherTypeIdentifier,
+							});
+						}
+
+						const resultVarDecl = GoAST.createVariableDeclarationZeroValue({
+							identifier: resultVar,
+							typeReference: resultType,
+						});
+
+						const ifStmt = GoAST.createIfStatement({
+							condition: GoAST.createCallExpression({
+								callee: GoAST.createSelectorExpression({
+									target: eitherVar,
+									identifier: isRightMethodIdentifier,
+								}),
+								arguments: [],
 							}),
-						],
-					}),
-					elseBranch: GoAST.createBlockStatement({
-						statements: [
-							GoAST.createAssignmentStatement({
-								targets: DCommon.cast([resultVar]),
-								values: DCommon.cast([eitherVar]),
+							body: GoAST.createBlockStatement({
+								statements: [
+									...invoked.before,
+									GoAST.createAssignmentStatement({
+										targets: DCommon.cast([resultVar]),
+										values: DCommon.cast([invoked.result]),
+									}),
+								],
 							}),
-						],
-					}),
-				});
-
-				beforeStatements.push(resultVarDecl, ifStmt);
-				currentExpr = resultVar;
-				continue;
-			}
-
-			// whenIsRightOtherwise(onRight, onLeft) dans pipe
-			if (calleeName === "whenIsRightOtherwise" && stepNode.arguments.length === 2) {
-				const onRightArg = stepNode.arguments[0]!;
-				const onLeftArg = stepNode.arguments[1]!;
-				const eitherVar = currentExpr;
-
-				const prevType = await typeChecker.getTypeAtLocation(node.arguments[i - 1]!);
-				const rightValueType = await getEitherRightValueType(prevType, stepNode, context);
-
-				let argExpr: GoAST.Expression = eitherVar;
-				if (rightValueType) {
-					argExpr = GoAST.createTypeAssertionExpression({
-						target: GoAST.createCallExpression({
-							callee: GoAST.createSelectorExpression({
-								target: eitherVar,
-								identifier: getValueMethodIdentifier,
+							elseBranch: GoAST.createBlockStatement({
+								statements: [
+									GoAST.createAssignmentStatement({
+										targets: DCommon.cast([resultVar]),
+										values: DCommon.cast([eitherVar]),
+									}),
+								],
 							}),
-							arguments: [],
-						}),
-						typeReference: rightValueType,
-					});
-				}
+						});
 
-				const invokedRight = await DCommon.asyncPipe(
-					invokeCallable(onRightArg, argExpr, context),
-					DEither.unwrapRight,
-				);
-				if (DEither.isLeft(invokedRight)) {
-					return context.error(stepNode, { message: "pipe-whenIsRightOtherwise-onRight-error", cause: invokedRight });
-				}
+						beforeStatements.push(resultVarDecl, ifStmt);
+						currentExpr = resultVar;
+						continue;
+					}
 
-				const invokedLeft = await DCommon.asyncPipe(
-					invokeCallable(onLeftArg, undefined, context),
-					DEither.unwrapRight,
-				);
-				if (DEither.isLeft(invokedLeft)) {
-					return context.error(stepNode, "pipe-whenIsRightOtherwise-onLeft-error");
-				}
+					// whenIsRightOtherwise(onRight, onLeft) dans pipe
+					if (exportName === "whenIsRightOtherwise" && entry.startsWith("dist/either/") && stepNode.arguments.length === 2) {
+						const [onRightArg, onLeftArg] = stepNode.arguments;
+						if (!onRightArg || !onLeftArg) {
+							return context.error(stepNode, "pipe-whenIsRightOtherwise-missing-arguments");
+						}
+						const eitherVar = currentExpr;
 
-				// Type statique de retour via la signature de onLeftArg
-				let resultType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.any;
-				const leftSig = DArray.first(
-					await typeChecker.getSignaturesOfType(
-						await typeChecker.getTypeAtLocation(onLeftArg),
-						SignatureKind.Call,
-					),
-				);
-				if (leftSig) {
-					const retType = await typeChecker.getReturnTypeOfSignature(leftSig);
-					const transformed = await DCommon.asyncPipe(
-						transformCheckerType(retType, onLeftArg, context),
-						DEither.unwrapRight,
-					);
-					if (!DEither.isLeft(transformed)) {
-						resultType = transformed.result;
-						if (DModeling.hasTagValue(resultType, "[node][type]array")) {
-							const arr = resultType as GoAST.ArrayType;
-							if (DModeling.hasTagValue(arr.length, "[node][expression]literal-integer") && (arr.length as GoAST.IntegerLiteral).value === 1n) {
-								resultType = GoAST.createSliceType({ elementType: arr.elementType });
+						const prevArg = node.arguments[stepIndex - 1];
+						if (!prevArg) {
+							return context.error(node, "pipe-missing-prev-argument");
+						}
+						const prevType = await typeChecker.getTypeAtLocation(prevArg);
+						const rightValueType = await getEitherRightValueType(prevType, stepNode, context);
+
+						let argExpr: GoAST.Expression = eitherVar;
+						if (rightValueType) {
+							argExpr = GoAST.createTypeAssertionExpression({
+								target: GoAST.createCallExpression({
+									callee: GoAST.createSelectorExpression({
+										target: eitherVar,
+										identifier: getValueMethodIdentifier,
+									}),
+									arguments: [],
+								}),
+								typeReference: rightValueType,
+							});
+						}
+
+						const invokedRight = await DCommon.asyncPipe(
+							invokeCallable(onRightArg, argExpr, context),
+							DEither.unwrapRight,
+						);
+						if (DEither.isLeft(invokedRight)) {
+							return context.error(stepNode, {
+								message: "pipe-whenIsRightOtherwise-onRight-error",
+								cause: invokedRight,
+							});
+						}
+
+						let leftExpectsArg = false;
+						if (TsAST.isArrowFunction(onLeftArg) || TsAST.isFunctionExpression(onLeftArg)) {
+							leftExpectsArg = onLeftArg.parameters.length >= 1;
+						} else {
+							const leftFnType = await typeChecker.getTypeAtLocation(onLeftArg);
+							const leftSigs = await typeChecker.getSignaturesOfType(leftFnType, SignatureKind.Call);
+							const firstSig = leftSigs[0];
+							if (firstSig) {
+								const sigParams = await firstSig.getParameters();
+								leftExpectsArg = sigParams.length >= 1;
 							}
 						}
+
+						const invokedLeft = await DCommon.asyncPipe(
+							invokeCallable(onLeftArg, leftExpectsArg ? eitherVar : undefined, context),
+							DEither.unwrapRight,
+						);
+						if (DEither.isLeft(invokedLeft)) {
+							return context.error(stepNode, "pipe-whenIsRightOtherwise-onLeft-error");
+						}
+
+						// Type statique de retour via la signature de onLeftArg
+						let resultType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.any;
+						const leftSig = DArray.first(
+							await typeChecker.getSignaturesOfType(
+								await typeChecker.getTypeAtLocation(onLeftArg),
+								SignatureKind.Call,
+							),
+						);
+						if (leftSig) {
+							const retType = await typeChecker.getReturnTypeOfSignature(leftSig);
+							const transformed = await DCommon.asyncPipe(
+								transformCheckerType(retType, onLeftArg, context),
+								DEither.unwrapRight,
+							);
+							if (!DEither.isLeft(transformed)) {
+								resultType = transformed.result;
+								if (DModeling.hasTagValue(resultType, "[node][type]array")) {
+									const arr = resultType as GoAST.ArrayType;
+									if (DModeling.hasTagValue(arr.length, "[node][expression]literal-integer") && (arr.length as GoAST.IntegerLiteral).value === 1n) {
+										resultType = GoAST.createSliceType({ elementType: arr.elementType });
+									}
+								}
+							}
+						}
+
+						const resultVar = context.generateIdentifier();
+						const resultVarDecl = GoAST.createVariableDeclarationZeroValue({
+							identifier: resultVar,
+							typeReference: resultType,
+						});
+
+						const ifStmt = GoAST.createIfStatement({
+							condition: GoAST.createCallExpression({
+								callee: GoAST.createSelectorExpression({
+									target: eitherVar,
+									identifier: isRightMethodIdentifier,
+								}),
+								arguments: [],
+							}),
+							body: GoAST.createBlockStatement({
+								statements: [
+									...invokedRight.before,
+									GoAST.createAssignmentStatement({
+										targets: DCommon.cast([resultVar]),
+										values: DCommon.cast([invokedRight.result]),
+									}),
+								],
+							}),
+							elseBranch: GoAST.createBlockStatement({
+								statements: [
+									...invokedLeft.before,
+									GoAST.createAssignmentStatement({
+										targets: DCommon.cast([resultVar]),
+										values: DCommon.cast([invokedLeft.result]),
+									}),
+								],
+							}),
+						});
+
+						beforeStatements.push(resultVarDecl, ifStmt);
+						currentExpr = resultVar;
+						continue;
+					}
+
+					// DArray.map(fn) dans pipe
+					if (exportName === "map" && entry.startsWith("dist/array/") && stepNode.arguments.length === 1) {
+						const [fnArg] = stepNode.arguments;
+						if (!fnArg) {
+							return context.error(stepNode, "pipe-map-missing-argument");
+						}
+						const transformedFn = await DCommon.asyncPipe(
+							context.transform(fnArg, expressionTransformers.value),
+							DEither.unwrapRight,
+						);
+						if (DEither.isLeft(transformedFn)) {
+							return transformedFn;
+						}
+
+						let hasIndexParam = false;
+						if (TsAST.isArrowFunction(fnArg) || TsAST.isFunctionExpression(fnArg)) {
+							hasIndexParam = fnArg.parameters.length >= 2;
+						} else {
+							const fnType = await typeChecker.getTypeAtLocation(fnArg);
+							const fnSigs = await typeChecker.getSignaturesOfType(fnType, SignatureKind.Call);
+							const firstSig = fnSigs[0];
+							if (firstSig) {
+								const sigParams = await firstSig.getParameters();
+								hasIndexParam = sigParams.length >= 2;
+							}
+						}
+						const mapFnId = hasIndexParam ? arrayMapIndexFunctionIdentifier : arrayMapFunctionIdentifier;
+
+						beforeStatements.push(...(transformedFn.before ?? []));
+						const nextVar = context.generateIdentifier();
+						beforeStatements.push(
+							GoAST.createShortVariableDeclarationStatement({
+								identifier: nextVar,
+								initializer: GoAST.createCallExpression({
+									callee: GoAST.createSelectorExpression({
+										target: context.registerSharedDependency(arrayMapDependency.value),
+										identifier: mapFnId,
+									}),
+									arguments: [currentExpr, transformedFn.result],
+								}),
+							}),
+						);
+						currentExpr = nextVar;
+						continue;
+					}
+
+					// DString.test(regex) dans pipe
+					if (exportName === "test" && entry.startsWith("dist/string/") && stepNode.arguments.length === 1) {
+						const [regexArg] = stepNode.arguments;
+						if (!regexArg) {
+							return context.error(stepNode, "pipe-test-missing-argument");
+						}
+
+						context.file.imports.add(
+							GoAST.createImportDeclaration({ path: "regexp" }),
+						);
+
+						let rawPattern = "";
+						let flags = "";
+						if (TsAST.isRegularExpressionLiteral(regexArg)) {
+							const text = regexArg.text;
+							const lastSlash = text.lastIndexOf("/");
+							if (lastSlash > 0) {
+								rawPattern = text.slice(1, lastSlash);
+								flags = text.slice(lastSlash + 1);
+							} else {
+								rawPattern = text;
+							}
+						} else if (TsAST.isStringLiteral(regexArg)) {
+							rawPattern = regexArg.text;
+						}
+
+						let prefix = "";
+						if (flags.includes("i")) prefix += "i";
+						if (flags.includes("m")) prefix += "m";
+						if (flags.includes("s")) prefix += "s";
+						const goPattern = (prefix ? `(?${prefix})` : "") + rawPattern;
+
+						const reIdent = context.generateIdentifier();
+						context.file.declarations.add(
+							GoAST.createVariableDeclarationInitialized({
+								identifier: reIdent,
+								initializer: GoAST.createCallExpression({
+									callee: GoAST.createSelectorExpression({
+										target: GoAST.createIdentifier("regexp"),
+										identifier: GoAST.createIdentifier("MustCompile"),
+									}),
+									arguments: [GoAST.createStringLiteral({ value: goPattern })],
+								}),
+							}),
+						);
+
+						const nextVar = context.generateIdentifier();
+						beforeStatements.push(
+							GoAST.createShortVariableDeclarationStatement({
+								identifier: nextVar,
+								initializer: GoAST.createCallExpression({
+									callee: GoAST.createSelectorExpression({
+										target: reIdent,
+										identifier: GoAST.createIdentifier("MatchString"),
+									}),
+									arguments: [currentExpr],
+								}),
+							}),
+						);
+						currentExpr = nextVar;
+						continue;
 					}
 				}
-
-				const resultVar = context.generateIdentifier();
-				const resultVarDecl = GoAST.createVariableDeclarationZeroValue({
-					identifier: resultVar,
-					typeReference: resultType,
-				});
-
-				const ifStmt = GoAST.createIfStatement({
-					condition: GoAST.createCallExpression({
-						callee: GoAST.createSelectorExpression({
-							target: eitherVar,
-							identifier: isRightMethodIdentifier,
-						}),
-						arguments: [],
-					}),
-					body: GoAST.createBlockStatement({
-						statements: [
-							...invokedRight.before,
-							GoAST.createAssignmentStatement({
-								targets: DCommon.cast([resultVar]),
-								values: DCommon.cast([invokedRight.result]),
-							}),
-						],
-					}),
-					elseBranch: GoAST.createBlockStatement({
-						statements: [
-							...invokedLeft.before,
-							GoAST.createAssignmentStatement({
-								targets: DCommon.cast([resultVar]),
-								values: DCommon.cast([invokedLeft.result]),
-							}),
-						],
-					}),
-				});
-
-				beforeStatements.push(resultVarDecl, ifStmt);
-				currentExpr = resultVar;
-				continue;
-			}
-
-			// DArray.map(fn) dans pipe
-			if (calleeName === "map" && stepNode.arguments.length === 1) {
-				const fnArg = stepNode.arguments[0]!;
-				const transformedFn = await DCommon.asyncPipe(
-					context.transform(fnArg, expressionTransformers.value),
-					DEither.unwrapRight,
-				);
-				if (DEither.isLeft(transformedFn)) {
-					return transformedFn;
-				}
-
-				beforeStatements.push(...(transformedFn.before ?? []));
-				const nextVar = context.generateIdentifier();
-				beforeStatements.push(
-					GoAST.createShortVariableDeclarationStatement({
-						identifier: nextVar,
-						initializer: GoAST.createCallExpression({
-							callee: GoAST.createSelectorExpression({
-								target: context.registerSharedDependency(arrayMapDependency.value),
-								identifier: arrayMapFunctionIdentifier,
-							}),
-							arguments: [currentExpr, transformedFn.result],
-						}),
-					}),
-				);
-				currentExpr = nextVar;
-				continue;
 			}
 		}
 
 		// Appel callable standard (identifier, arrow function, property access)
-		const prevType = await typeChecker.getTypeAtLocation(node.arguments[i - 1]!);
+		const prevArg = node.arguments[stepIndex - 1];
+		if (!prevArg) {
+			return context.error(node, "pipe-missing-prev-argument");
+		}
+		const prevType = await typeChecker.getTypeAtLocation(prevArg);
 		const invoked = await DCommon.asyncPipe(
 			invokeCallable(stepNode, currentExpr, context, prevType),
 			DEither.unwrapRight,

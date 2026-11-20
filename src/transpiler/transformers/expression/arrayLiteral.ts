@@ -7,8 +7,11 @@ import * as DCommon from "@duplojs/lang/common";
 import * as DEither from "@duplojs/lang/either";
 import { expressionTransformers } from ".";
 import { transformCheckerType } from "../type/fromChecker";
+import { tupleSharedDependency } from "../type/tupleSharedDependency";
 
-export const arrayLiteralTransformer: Transformer<GoAST.SliceLiteral | GoAST.ArrayLiteral> = createTransformer(
+export const arrayLiteralTransformer: Transformer<
+	GoAST.SliceLiteral | GoAST.ArrayLiteral | GoAST.CallExpression
+> = createTransformer(
 	async(node, context) => {
 		if (!TsAST.isArrayLiteralExpression(node)) {
 			return context.notSupport();
@@ -32,10 +35,28 @@ export const arrayLiteralTransformer: Transformer<GoAST.SliceLiteral | GoAST.Arr
 		}
 
 		const successfulElements = elementsResult as readonly TransformationSuccessPayload<GoAST.Expression>[];
-		const before = DArray.flatMap(successfulElements, (e) => e.before ?? []);
-		const elementExprs = DArray.map(successfulElements, (e) => e.result);
+		const before = DArray.flatMap(successfulElements, (item) => item.before ?? []);
+		const elementExprs = DArray.map(successfulElements, (item) => item.result);
 
 		const type = await typeChecker.getTypeAtLocation(node);
+		const tsTypeNode = await typeChecker.typeToTypeNode(type, node);
+		if (tsTypeNode && TsAST.isTupleTypeNode(tsTypeNode)) {
+			const count = node.elements.length;
+			if (count >= 2 && count <= 8) {
+				const tuplePkg = context.registerSharedDependency(tupleSharedDependency.value);
+				return context.success({
+					before,
+					result: GoAST.createCallExpression({
+						callee: GoAST.createSelectorExpression({
+							target: tuplePkg,
+							identifier: GoAST.createIdentifier(`Tuple${count}Of`),
+						}),
+						arguments: elementExprs,
+					}),
+				});
+			}
+		}
+
 		const typeNode = await DCommon.asyncPipe(
 			transformCheckerType(type, node, context),
 			DEither.unwrapRight,
@@ -74,17 +95,18 @@ export const arrayLiteralTransformer: Transformer<GoAST.SliceLiteral | GoAST.Arr
 			}
 		}
 
-		const firstElement = node.elements[0];
-		let elemType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.float64;
-		if (firstElement) {
-			const firstElType = await DCommon.asyncPipe(
-				transformCheckerType(await typeChecker.getTypeAtLocation(firstElement), firstElement, context),
-				DEither.unwrapRight,
-			);
-			if (!DEither.isLeft(firstElType)) {
-				elemType = firstElType.result;
-			}
+		const [firstElement] = node.elements;
+		if (!firstElement) {
+			return context.error(node, "array-literal-cannot-determine-type");
 		}
+		const firstElType = await DCommon.asyncPipe(
+			transformCheckerType(await typeChecker.getTypeAtLocation(firstElement), firstElement, context),
+			DEither.unwrapRight,
+		);
+		if (DEither.isLeft(firstElType)) {
+			return context.error(firstElement, "array-literal-element-type-error");
+		}
+		const elemType: GoAST.Type | GoAST.TypeReference = firstElType.result;
 
 		return context.success({
 			before,

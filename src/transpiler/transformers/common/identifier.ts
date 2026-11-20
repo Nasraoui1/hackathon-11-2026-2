@@ -3,7 +3,9 @@ import * as DEither from "@duplojs/lang/either";
 import { GoAST } from "@go";
 import { createTransformer, type Transformer } from "@transformer";
 import { TsAST } from "@typescript";
+import { SymbolFlags } from "typescript/async";
 import { transformCheckerType } from "../type/fromChecker";
+import { isEitherType } from "../duplojs/either/isEitherType";
 
 export const identifierTransformer: Transformer<GoAST.Expression> = createTransformer(
 	async(node, context) => {
@@ -13,15 +15,17 @@ export const identifierTransformer: Transformer<GoAST.Expression> = createTransf
 
 		const { typeChecker } = context.transpilation;
 
-		if (context.file.unwrappedVariables.has(node.text)) {
+		const nodeSymbol = await typeChecker.getSymbolAtLocation(node);
+		const resolvedSymbol = nodeSymbol && (nodeSymbol.flags & SymbolFlags.Alias)
+			? await typeChecker.getAliasedSymbol(nodeSymbol)
+			: nodeSymbol;
+
+		const isUnwrapped = (nodeSymbol && context.file.unwrappedVariables.has(nodeSymbol))
+			|| (resolvedSymbol && context.file.unwrappedVariables.has(resolvedSymbol));
+
+		if (isUnwrapped) {
 			const typeAtLoc = await typeChecker.getTypeAtLocation(node);
-			const typeStr = await typeChecker.typeToString(typeAtLoc);
-			const isEither = typeStr.includes("Left<")
-				|| typeStr.includes("Right<")
-				|| typeStr.includes("Success<")
-				|| typeStr.includes("Error<")
-				|| typeStr.includes("Fail")
-				|| typeStr.includes("Either");
+			const isEither = await isEitherType(typeAtLoc, node, context);
 
 			if (!isEither) {
 				const baseIdent = context.createSourceIdentifier(node.text);

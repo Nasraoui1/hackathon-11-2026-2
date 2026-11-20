@@ -127,8 +127,7 @@ export async function resolveDependencyFile(
 		return DEither.none();
 	}
 
-	const rawPath = declaration.path.startsWith("/") ? declaration.path : `/${declaration.path}`;
-	const filePath = DEither.unwrapRight(DPath.createAbsolute(rawPath));
+	const filePath = DEither.unwrapRight(DPath.createAbsolute(declaration.path));
 	if (
 		DEither.isLeft(filePath)
 		|| filePath === context.file.currentFilePath

@@ -74,7 +74,10 @@ export const eitherRightDependency = DCommon.memo(() => {
 									elements: [
 										GoAST.createKeyedElement({
 											key: GoAST.createIdentifier("Right"),
-											value: GoAST.createStructLiteral({ typeReference: nullType, elements: [] }),
+											value: GoAST.createStructLiteral({
+												typeReference: nullType,
+												elements: [],
+											}),
 										}),
 										GoAST.createKeyedElement({
 											key: GoAST.createIdentifier("Information"),

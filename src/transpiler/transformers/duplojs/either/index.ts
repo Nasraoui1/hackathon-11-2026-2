@@ -113,7 +113,8 @@ export const duploJSEitherExpressionTransformer: Transformer<GoAST.Expression> =
 	},
 );
 
-export const duploJSEitherTypeTransformer: Transformer<GoAST.GenericTypeReference | GoAST.PackageTypeReference> = createTransformer(
+type EitherTypeTransformerResult = GoAST.GenericTypeReference | GoAST.PackageTypeReference;
+export const duploJSEitherTypeTransformer: Transformer<EitherTypeTransformerResult> = createTransformer(
 	async(node, context) => {
 		if (!TsAST.isTypeReferenceNode(node) && !TsAST.isImportTypeNode(node)) {
 			return context.notSupport();

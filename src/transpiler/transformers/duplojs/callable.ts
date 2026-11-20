@@ -1,13 +1,11 @@
 import * as DCommon from "@duplojs/lang/common";
-import * as DArray from "@duplojs/lang/array";
 import * as DEither from "@duplojs/lang/either";
 import * as DModeling from "@duplojs/lang/modeling";
 import { GoAST } from "@go";
 import { TsAST } from "@typescript";
-import { SignatureKind, TypeFlags, type Type, type UnionType } from "typescript/async";
+import { SignatureKind, type Type } from "typescript/async";
 import type { BuildContext } from "../../context/build";
 import { expressionTransformers } from "../expression";
-import { transformCheckerType } from "../type/fromChecker";
 import { arrayCoalescingDependency, arrayCoalescingFunctionIdentifier } from "./array/coalescing/sharedDependency";
 import { numberToStringDependency, numberToStringFunctionIdentifier } from "./string/to/sharedDependency";
 import { eitherSuccessDependency, successFunctionIdentifier } from "./either/success/sharedDependency";
@@ -29,82 +27,100 @@ export async function invokeCallable(
 ): Promise<DEither.Success<CallableInvocation> | DEither.Left<string, unknown>> {
 	const { typeChecker } = context.transpilation;
 
-	// Détection des intrinsèques point-free connues
-	if (TsAST.isPropertyAccessExpression(callableNode)) {
-		const propName = callableNode.name.text;
-		const targetName = TsAST.isIdentifier(callableNode.expression) ? callableNode.expression.text : "";
+	// Détection des intrinsèques point-free connues via résolution de module sémantique
+	if (TsAST.isPropertyAccessExpression(callableNode) || TsAST.isIdentifier(callableNode)) {
+		const modRef = await DCommon.asyncPipe(
+			context.resolveReferenceModule(callableNode, "@duplojs/lang"),
+			DEither.unwrapRight,
+		);
 
-		if (targetName === "DArray" && propName === "coalescing") {
-			if (inputType && argumentExpr) {
-				const symbol = (inputType as any).aliasSymbol ?? (inputType as any).symbol;
-				const isArray = (symbol && (symbol.name === "Array" || symbol.name === "ReadonlyArray"))
-					|| (Boolean((typeChecker as any).isArrayType?.(inputType)))
-					|| (Boolean((typeChecker as any).isTupleType?.(inputType)));
-				if (isArray) {
-					return DEither.success({
-						before: [],
-						result: argumentExpr,
-					});
+		if (!DEither.isLeft(modRef)) {
+			const { exportName, entry } = modRef;
+
+			if (exportName === "coalescing" && entry.startsWith("dist/array/")) {
+				if (inputType && argumentExpr) {
+					const inputTypeRecord = inputType as unknown as {
+						aliasSymbol?: { name?: string };
+						symbol?: { name?: string };
+					};
+					const symbol = inputTypeRecord.aliasSymbol ?? inputTypeRecord.symbol;
+					const symbolName = symbol?.name;
+					interface CheckerRecord {
+						isArrayType?(typeVal: unknown): boolean;
+						isTupleType?(typeVal: unknown): boolean;
+					}
+					const checkerRecord = typeChecker as unknown as CheckerRecord;
+					const isArray = (symbolName === "Array" || symbolName === "ReadonlyArray")
+						|| Boolean(checkerRecord.isArrayType?.(inputType))
+						|| Boolean(checkerRecord.isTupleType?.(inputType));
+						|| (await typeChecker.isArrayType(inputType))
+						|| (await typeChecker.isTupleType(inputType));
+					if (isArray) {
+						return DEither.success({
+							before: [],
+							result: argumentExpr,
+						});
+					}
 				}
-			}
-			const target = context.registerSharedDependency(arrayCoalescingDependency.value);
-			return DEither.success({
-				before: [],
-				result: GoAST.createCallExpression({
-					callee: GoAST.createSelectorExpression({
-						target,
-						identifier: arrayCoalescingFunctionIdentifier,
-					}),
-					arguments: argumentExpr ? [argumentExpr] : [],
-				}),
-			});
-		}
-
-		if (targetName === "DString" && propName === "to") {
-			const target = context.registerSharedDependency(numberToStringDependency.value);
-			return DEither.success({
-				before: [],
-				result: GoAST.createCallExpression({
-					callee: GoAST.createSelectorExpression({
-						target,
-						identifier: numberToStringFunctionIdentifier,
-					}),
-					arguments: argumentExpr ? [argumentExpr] : [],
-				}),
-			});
-		}
-
-		if (targetName === "DString" && propName === "length") {
-			context.file.imports.add(GoAST.createImportDeclaration({ path: "unicode/utf8" }));
-			return DEither.success({
-				before: [],
-				result: GoAST.createCallExpression({
-					callee: GoAST.builtinTypeReferences.float64,
-					arguments: [
-						GoAST.createCallExpression({
-							callee: GoAST.createSelectorExpression({
-								target: GoAST.createIdentifier("utf8"),
-								identifier: GoAST.createIdentifier("RuneCountInString"),
-							}),
-							arguments: argumentExpr ? [argumentExpr] : [],
+				const target = context.registerSharedDependency(arrayCoalescingDependency.value);
+				return DEither.success({
+					before: [],
+					result: GoAST.createCallExpression({
+						callee: GoAST.createSelectorExpression({
+							target,
+							identifier: arrayCoalescingFunctionIdentifier,
 						}),
-					],
-				}),
-			});
-		}
-
-		if (targetName === "DEither" && propName === "success") {
-			const target = context.registerSharedDependency(eitherSuccessDependency.value);
-			return DEither.success({
-				before: [],
-				result: GoAST.createCallExpression({
-					callee: GoAST.createSelectorExpression({
-						target,
-						identifier: successFunctionIdentifier,
+						arguments: argumentExpr ? [argumentExpr] : [],
 					}),
-					arguments: argumentExpr ? [argumentExpr] : [],
-				}),
-			});
+				});
+			}
+
+			if (exportName === "to" && entry.startsWith("dist/string/")) {
+				const target = context.registerSharedDependency(numberToStringDependency.value);
+				return DEither.success({
+					before: [],
+					result: GoAST.createCallExpression({
+						callee: GoAST.createSelectorExpression({
+							target,
+							identifier: numberToStringFunctionIdentifier,
+						}),
+						arguments: argumentExpr ? [argumentExpr] : [],
+					}),
+				});
+			}
+
+			if (exportName === "length" && entry.startsWith("dist/string/")) {
+				context.file.imports.add(GoAST.createImportDeclaration({ path: "unicode/utf8" }));
+				return DEither.success({
+					before: [],
+					result: GoAST.createCallExpression({
+						callee: GoAST.builtinTypeReferences.float64,
+						arguments: [
+							GoAST.createCallExpression({
+								callee: GoAST.createSelectorExpression({
+									target: GoAST.createIdentifier("utf8"),
+									identifier: GoAST.createIdentifier("RuneCountInString"),
+								}),
+								arguments: argumentExpr ? [argumentExpr] : [],
+							}),
+						],
+					}),
+				});
+			}
+
+			if (exportName === "success" && entry.startsWith("dist/either/")) {
+				const target = context.registerSharedDependency(eitherSuccessDependency.value);
+				return DEither.success({
+					before: [],
+					result: GoAST.createCallExpression({
+						callee: GoAST.createSelectorExpression({
+							target,
+							identifier: successFunctionIdentifier,
+						}),
+						arguments: argumentExpr ? [argumentExpr] : [],
+					}),
+				});
+			}
 		}
 	}
 
@@ -175,8 +191,9 @@ export async function getEitherRightValueType(
 	const { typeChecker } = context.transpilation;
 
 	const sigs = await typeChecker.getSignaturesOfType(eitherType, SignatureKind.Call);
-	if (sigs && sigs.length > 0) {
-		const retType = await typeChecker.getReturnTypeOfSignature(sigs[0]!);
+	const [firstSig] = sigs ?? [];
+	if (firstSig) {
+		const retType = await typeChecker.getReturnTypeOfSignature(firstSig);
 		return getEitherRightValueType(retType, location, context);
 	}
 
@@ -187,50 +204,64 @@ export async function getEitherRightValueType(
 
 	const members = TsAST.isUnionTypeNode(typeNode) ? [...typeNode.types] : [typeNode];
 
-	for (let idx = 0; idx < members.length; idx++) {
-		const m = members[idx]!;
-		if (TsAST.isTypeReferenceNode(m)) {
-			const typeName = TsAST.isIdentifier(m.typeName)
-				? m.typeName.text
-				: TsAST.isQualifiedName(m.typeName)
-					? m.typeName.right.text
-					: "";
+	let memberIndex = 0;
+	while (memberIndex < members.length) {
+		const memberNode = members[memberIndex];
+		memberIndex++;
+		if (!memberNode) {
+			continue;
+		}
+		if (TsAST.isTypeReferenceNode(memberNode)) {
+			let typeName = "";
+			if (TsAST.isIdentifier(memberNode.typeName)) {
+				typeName = memberNode.typeName.text;
+			} else if (TsAST.isQualifiedName(memberNode.typeName)) {
+				typeName = memberNode.typeName.right.text;
+			}
 
-			if (typeName === "Promise" && m.typeArguments?.[0]) {
-				const inner = m.typeArguments[0];
-				if (TsAST.isUnionTypeNode(inner)) {
-					members.push(...inner.types);
-				} else {
-					members.push(inner);
+			if (typeName === "Promise" && memberNode.typeArguments) {
+				const [inner] = memberNode.typeArguments;
+				if (inner) {
+					if (TsAST.isUnionTypeNode(inner)) {
+						members.push(...inner.types);
+					} else {
+						members.push(inner);
+					}
 				}
 				continue;
 			}
 
-			if (typeName === "Success" && m.typeArguments?.[0]) {
-				const transformed = await DCommon.asyncPipe(
-					context.transform(m.typeArguments[0], typeTransformers.value),
-					DEither.unwrapRight,
-				);
-				if (!DEither.isLeft(transformed)) {
-					let res = transformed.result;
-					if (DModeling.hasTagValue(res, "[node][type]array")) {
-						res = GoAST.createSliceType({ elementType: (res as GoAST.ArrayType).elementType });
+			if (typeName === "Success" && memberNode.typeArguments) {
+				const [typeArg] = memberNode.typeArguments;
+				if (typeArg) {
+					const transformed = await DCommon.asyncPipe(
+						context.transform(typeArg, typeTransformers.value),
+						DEither.unwrapRight,
+					);
+					if (!DEither.isLeft(transformed)) {
+						let res = transformed.result;
+						if (DModeling.hasTagValue(res, "[node][type]array")) {
+							res = GoAST.createSliceType({ elementType: (res as GoAST.ArrayType).elementType });
+						}
+						return res;
 					}
-					return res;
 				}
 			}
 
-			if (typeName === "Right" && m.typeArguments?.[1]) {
-				const transformed = await DCommon.asyncPipe(
-					context.transform(m.typeArguments[1], typeTransformers.value),
-					DEither.unwrapRight,
-				);
-				if (!DEither.isLeft(transformed)) {
-					let res = transformed.result;
-					if (DModeling.hasTagValue(res, "[node][type]array")) {
-						res = GoAST.createSliceType({ elementType: (res as GoAST.ArrayType).elementType });
+			if (typeName === "Right" && memberNode.typeArguments) {
+				const [, rightArg] = memberNode.typeArguments;
+				if (rightArg) {
+					const transformed = await DCommon.asyncPipe(
+						context.transform(rightArg, typeTransformers.value),
+						DEither.unwrapRight,
+					);
+					if (!DEither.isLeft(transformed)) {
+						let res = transformed.result;
+						if (DModeling.hasTagValue(res, "[node][type]array")) {
+							res = GoAST.createSliceType({ elementType: (res as GoAST.ArrayType).elementType });
+						}
+						return res;
 					}
-					return res;
 				}
 			}
 		}

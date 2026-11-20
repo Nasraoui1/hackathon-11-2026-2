@@ -28,9 +28,10 @@ export async function whenIsRightOtherwiseExpressionHandler(
 
 	// Forme data-first : DEither.whenIsRightOtherwise(either, onRight, onLeft)
 	if (node.arguments.length === 3) {
-		const eitherArg = node.arguments[0]!;
-		const onRightArg = node.arguments[1]!;
-		const onLeftArg = node.arguments[2]!;
+		const [eitherArg, onRightArg, onLeftArg] = node.arguments;
+		if (!eitherArg || !onRightArg || !onLeftArg) {
+			return context.error(node, "whenIsRightOtherwise-missing-arguments");
+		}
 
 		const transformedEither = await DCommon.asyncPipe(
 			context.transform(eitherArg, expressionTransformers.value),
@@ -69,11 +70,27 @@ export async function whenIsRightOtherwiseExpressionHandler(
 			DEither.unwrapRight,
 		);
 		if (DEither.isLeft(invokedRight)) {
-			return context.error(node, { message: "whenIsRightOtherwise-onRight-error", cause: invokedRight });
+			return context.error(node, {
+				message: "whenIsRightOtherwise-onRight-error",
+				cause: invokedRight,
+			});
+		}
+
+		let leftExpectsArg = false;
+		if (TsAST.isArrowFunction(onLeftArg) || TsAST.isFunctionExpression(onLeftArg)) {
+			leftExpectsArg = onLeftArg.parameters.length >= 1;
+		} else {
+			const leftFnType = await typeChecker.getTypeAtLocation(onLeftArg);
+			const leftSigs = await typeChecker.getSignaturesOfType(leftFnType, SignatureKind.Call);
+			const firstSig = leftSigs[0];
+			if (firstSig) {
+				const sigParams = await firstSig.getParameters();
+				leftExpectsArg = sigParams.length >= 1;
+			}
 		}
 
 		const invokedLeft = await DCommon.asyncPipe(
-			invokeCallable(onLeftArg, undefined, context),
+			invokeCallable(onLeftArg, leftExpectsArg ? eitherVar : undefined, context),
 			DEither.unwrapRight,
 		);
 		if (DEither.isLeft(invokedLeft)) {
@@ -152,8 +169,10 @@ export async function whenIsRightOtherwiseExpressionHandler(
 
 	// Forme curriée : DEither.whenIsRightOtherwise(onRight, onLeft)
 	if (node.arguments.length === 2) {
-		const onRightArg = node.arguments[0]!;
-		const onLeftArg = node.arguments[1]!;
+		const [onRightArg, onLeftArg] = node.arguments;
+		if (!onRightArg || !onLeftArg) {
+			return context.error(node, "whenIsRightOtherwise-curried-missing-arguments");
+		}
 
 		const eitherPkg = context.registerSharedDependency(eitherDependency.value);
 		const eitherTypeRef = GoAST.createPackageTypeReference({
@@ -166,14 +185,16 @@ export async function whenIsRightOtherwiseExpressionHandler(
 		// Déterminer le type de la valeur Right attendue
 		let rightValueType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.float64;
 		if (TsAST.isArrowFunction(onRightArg) && onRightArg.parameters.length > 0) {
-			const param = onRightArg.parameters[0]!;
-			const paramType = await typeChecker.getTypeAtLocation(param);
-			const transformed = await DCommon.asyncPipe(
-				transformCheckerType(paramType, param, context),
-				DEither.unwrapRight,
-			);
-			if (!DEither.isLeft(transformed)) {
-				rightValueType = transformed.result;
+			const [param] = onRightArg.parameters;
+			if (param) {
+				const paramType = await typeChecker.getTypeAtLocation(param);
+				const transformed = await DCommon.asyncPipe(
+					transformCheckerType(paramType, param, context),
+					DEither.unwrapRight,
+				);
+				if (!DEither.isLeft(transformed)) {
+					rightValueType = transformed.result;
+				}
 			}
 		}
 
@@ -196,8 +217,21 @@ export async function whenIsRightOtherwiseExpressionHandler(
 			return context.error(node, "whenIsRightOtherwise-curried-onRight-error");
 		}
 
+		let leftExpectsArg = false;
+		if (TsAST.isArrowFunction(onLeftArg) || TsAST.isFunctionExpression(onLeftArg)) {
+			leftExpectsArg = onLeftArg.parameters.length >= 1;
+		} else {
+			const leftFnType = await typeChecker.getTypeAtLocation(onLeftArg);
+			const leftSigs = await typeChecker.getSignaturesOfType(leftFnType, SignatureKind.Call);
+			const firstSig = leftSigs[0];
+			if (firstSig) {
+				const sigParams = await firstSig.getParameters();
+				leftExpectsArg = sigParams.length >= 1;
+			}
+		}
+
 		const invokedLeft = await DCommon.asyncPipe(
-			invokeCallable(onLeftArg, undefined, context),
+			invokeCallable(onLeftArg, leftExpectsArg ? itemIdent : undefined, context),
 			DEither.unwrapRight,
 		);
 		if (DEither.isLeft(invokedLeft)) {
@@ -205,26 +239,41 @@ export async function whenIsRightOtherwiseExpressionHandler(
 		}
 
 		let returnType: GoAST.Type | GoAST.TypeReference = GoAST.builtinTypeReferences.any;
-		const leftSig = DArray.first(
-			await typeChecker.getSignaturesOfType(
-				await typeChecker.getTypeAtLocation(onLeftArg),
-				SignatureKind.Call,
-			),
-		);
-		if (leftSig) {
-			const retType = await typeChecker.getReturnTypeOfSignature(leftSig);
+		const nodeType = await typeChecker.getTypeAtLocation(node);
+		const nodeSigs = await typeChecker.getSignaturesOfType(nodeType, SignatureKind.Call);
+		const firstNodeSig = nodeSigs[0];
+		if (firstNodeSig) {
+			const retType = await typeChecker.getReturnTypeOfSignature(firstNodeSig);
 			const transformed = await DCommon.asyncPipe(
-				transformCheckerType(retType, onLeftArg, context),
+				transformCheckerType(retType, node, context),
 				DEither.unwrapRight,
 			);
 			if (!DEither.isLeft(transformed)) {
 				returnType = transformed.result;
-				if (DModeling.hasTagValue(returnType, "[node][type]array")) {
-					const arr = returnType as GoAST.ArrayType;
-					if (DModeling.hasTagValue(arr.length, "[node][expression]literal-integer") && (arr.length as GoAST.IntegerLiteral).value === 1n) {
-						returnType = GoAST.createSliceType({ elementType: arr.elementType });
-					}
+			}
+		}
+		if (returnType === GoAST.builtinTypeReferences.any) {
+			const leftSig = DArray.first(
+				await typeChecker.getSignaturesOfType(
+					await typeChecker.getTypeAtLocation(onLeftArg),
+					SignatureKind.Call,
+				),
+			);
+			if (leftSig) {
+				const retType = await typeChecker.getReturnTypeOfSignature(leftSig);
+				const transformed = await DCommon.asyncPipe(
+					transformCheckerType(retType, onLeftArg, context),
+					DEither.unwrapRight,
+				);
+				if (!DEither.isLeft(transformed)) {
+					returnType = transformed.result;
 				}
+			}
+		}
+		if (DModeling.hasTagValue(returnType, "[node][type]array")) {
+			const arr = returnType as GoAST.ArrayType;
+			if (DModeling.hasTagValue(arr.length, "[node][expression]literal-integer") && (arr.length as GoAST.IntegerLiteral).value === 1n) {
+				returnType = GoAST.createSliceType({ elementType: arr.elementType });
 			}
 		}
 

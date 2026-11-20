@@ -20,7 +20,10 @@ export async function errorExpressionHandler(
 			return context.error(node, "error-requires-value");
 		}
 
-		const valArg = node.arguments[0]!;
+		const [valArg] = node.arguments;
+		if (!valArg) {
+			return context.error(node, "error-requires-value");
+		}
 		const transformedVal = await DCommon.asyncPipe(
 			context.transform(valArg, expressionTransformers.value),
 			DEither.unwrapRight,

@@ -104,7 +104,7 @@ export async function matchInformationExpressionHandler(
 		let callArguments: readonly GoAST.Expression[] = [];
 
 		if (signature.parameters.length > 0) {
-			let paramTypeRef: GoAST.Type | GoAST.TypeReference | undefined;
+			let paramTypeRef: GoAST.Type | GoAST.TypeReference | undefined = undefined;
 
 			const parameterType = await DCommon.asyncPipe(
 				transformCheckerType(
@@ -123,7 +123,7 @@ export async function matchInformationExpressionHandler(
 			}
 
 			if (!paramTypeRef) {
-				paramTypeRef = GoAST.builtinTypeReferences.float64;
+				return context.error(property.initializer, "match-information-cannot-determine-parameter-type");
 			}
 
 			callArguments = [
