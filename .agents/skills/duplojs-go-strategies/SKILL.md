@@ -192,3 +192,5 @@ Limites connues, à garder dans la documentation et la soutenance :
 | Concurrence réelle | `Promise.all`, I/O en parallèle non couverts | Goroutines quand l'ordre ne compte pas |
 | `Promise` | reconnu par son nom textuel | Résoudre le symbole |
 | Windows | correctif de chemins local requis | Intégrer la conversion dans le dépôt |
+| Étape de `rightPipe` qui renvoie une valeur brute | le Go ne compile pas (DuploJS l’enveloppe dans `success`) | Envelopper avec `EitherSuccessOf` quand le checker dit que l’étape ne renvoie pas un Either |
+| `left("…")` sans valeur | `print` affiche `"value": null`, Node omet la propriété | `MarshalJSON` sur `EitherLeft` qui omet un `JSUndefined` |

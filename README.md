@@ -53,16 +53,16 @@ Le coût de cette généralité est documenté : chaque conversion vers l’inte
 |---|---|---|---|
 | 00 (exemple) | Aziz | Correction : le Go fourni ne compilait pas (générique non instancié). Sortie identique à Node | [01/README](projects/01/README.md) |
 | 01 — union, `if`, `print` | Aziz | Sortie identique à Node | [projects/01](projects/01/README.md) |
-| 02 — fonction en argument | Louis-Martin | Sortie identique à Node | À rédiger |
-| 03 — `pipe` | Louis-Martin | Sortie identique à Node | À rédiger |
+| 02 — fonction en argument | Louis-Martin | Sortie identique à Node | [projects/02](projects/02/README.md) |
+| 03 — `pipe` | Louis-Martin | Sortie identique à Node | [projects/03](projects/03/README.md) |
 | 04 — `fail`, plusieurs `return` | Aziz, Louis-Martin (`pipe`) | Sortie identique à Node | [projects/04](projects/04/README.md) |
-| 05 — `whenIsRightOtherwise`, `map` | Louis-Martin | Sortie identique à Node | À rédiger |
+| 05 — `whenIsRightOtherwise`, `map` | Louis-Martin | Sortie identique à Node | [projects/05](projects/05/README.md) |
 | 06 — `left`, ternaire, `matchInformation` | Aziz, Louis-Martin (`pipe`) | Sortie identique à Node | [projects/06](projects/06/README.md) |
-| 07 — `rightPipe` | Louis-Martin | Sortie identique à Node | À rédiger |
-| 08 — tuples, déstructuration | Louis-Martin | Sortie identique à Node | À rédiger |
-| 09 — `group` | Louis-Martin | Sortie identique à Node | À rédiger |
-| 10 — asynchronisme | Louis-Martin | Sortie identique à Node | À rédiger |
-| 11 — `unwrapRight`, `isLeft`, regex (exemple du cours) | Louis-Martin | Sortie identique à Node | À rédiger |
+| 07 — `rightPipe` | Louis-Martin | Sortie identique à Node | [projects/07](projects/07/README.md) |
+| 08 — tuples, déstructuration | Louis-Martin | Sortie identique à Node | [projects/08](projects/08/README.md) |
+| 09 — `group` | Louis-Martin | Sortie identique à Node | [projects/09](projects/09/README.md) |
+| 10 — asynchronisme | Louis-Martin | Sortie identique à Node | [projects/10](projects/10/README.md) |
+| 11 — `unwrapRight`, `isLeft`, regex (exemple du cours) | Louis-Martin | Sortie identique à Node | [projects/11](projects/11/README.md) |
 
 « Sortie identique à Node » : le Go compile, passe `go vet`, et sa sortie est identique octet pour octet à celle de Node lorsque Node affiche en JSON (voir Reproduction).
 
