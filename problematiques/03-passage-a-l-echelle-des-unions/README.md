@@ -2,7 +2,7 @@
 
 ## Problématique
 
-Sur un vrai projet, une fonction peut renvoyer une union de nombreuses variantes (l’exemple montré pendant le hackathon en évoquait 13), dont les valeurs ont des types différents : un `number` pour une erreur, un `string` pour une autre, `undefined` pour une troisième. Quelle représentation Go reste valable quel que soit le nombre de variantes, sans faire grossir le code avec le projet ?
+Sur un vrai projet, une fonction peut renvoyer une union de nombreuses variantes, dont les valeurs ont des types différents : un `number` pour une erreur, un `string` pour une autre, `undefined` pour une troisième. Le professeur a ajouté le projet 11 pour illustrer ce point d’attention. Quelle représentation Go reste valable quel que soit le nombre de variantes, sans faire grossir le code avec le projet ?
 
 ## Stratégie retenue
 

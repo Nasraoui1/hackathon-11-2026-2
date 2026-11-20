@@ -2,7 +2,7 @@
 
 ## Origine
 
-Pendant le hackathon, le professeur a signalé un problème rencontré par plusieurs groupes, avec un exemple contenant beaucoup de variantes (devenu notre projet 11). Nous avons vérifié si notre représentation avait le même défaut.
+Pendant le hackathon, le professeur a mis en garde contre un piège dans lequel plusieurs groupes étaient tombés : une représentation qui fonctionne sur les exercices, avec deux variantes, mais pas sur une union plus large. Pour l’illustrer, il a ajouté un exemple, le **projet 11**, où une seule fonction renvoie trois variantes aux valeurs de types différents. Nous avons vérifié si notre représentation avait ce défaut.
 
 ## Approches qui ne passent pas à l’échelle
 

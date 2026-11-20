@@ -1,6 +1,6 @@
 # Projet 11
 
-Exemple présenté pendant le hackathon pour tester le passage à l’échelle des unions Either.
+Exemple ajouté par le professeur pendant le hackathon pour illustrer un point d’attention : une représentation des Either qui fonctionne avec deux variantes doit aussi tenir avec des unions plus larges, aux valeurs de types différents.
 
 ## Problématique
 
