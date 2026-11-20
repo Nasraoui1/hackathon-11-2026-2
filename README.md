@@ -4,9 +4,9 @@
 
 | | Nom | Prénom | Classe |
 |---|---|---|---|
-| 1 | Nasraoui | Aziz | À compléter |
-| 2 | Martin | Louis | À compléter |
-| 3 | Ratiaray | Lucas | À compléter |
+| 1 | Nasraoui | Aziz | 5IWJ |
+| 2 | Vanderlynden | Louis-Martin | 5IWJ |
+| 3 | Ratiaray | Lucas | 5IWJ |
 
 ## Objectif
 
