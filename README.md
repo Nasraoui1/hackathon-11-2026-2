@@ -12,6 +12,12 @@
 
 Étudier s’il est possible de transpiler du DuploJS vers Go pour obtenir un programme performant tout en conservant le comportement d’origine. Les dix exercices se trouvent dans `projects/01` à `projects/10`. Le projet `projects/00` présente une solution et sert de point de départ.
 
+## Rendu par problématique
+
+**Le cœur du rendu est le dossier [`problematiques/`](problematiques/)** : un dossier par problématique étudiée (12, plus des benchmarks en bonus). Chacun contient un court README, l’historique de nos réflexions (pistes explorées, choix et justifications) et des exemples TypeScript / Go écrits à la main, vérifiés pour afficher la même chose. Le [README du dossier](problematiques/README.md) donne le découpage, la correspondance avec les exercices et l’organisation de l’équipe.
+
+Les sections ci-dessous résument les stratégies et l’état de chaque exercice ; les README de `projects/XX/` montrent le Go réellement généré.
+
 ## Démarche
 
 1. **Un skill d’équipe** ([`.agents/skills/duplojs-go-strategies/SKILL.md`](.agents/skills/duplojs-go-strategies/SKILL.md)) rassemble nos règles de traduction. Chaque règle est marquée *Proposé* ou *Décidé* et porte sa justification. Il complète les skills fournis (`typescript-to-go`, `go-ast`, `go-printer`), qui décrivent l’architecture du transpileur. Le skill est mis à jour à chaque décision, avant le code.
