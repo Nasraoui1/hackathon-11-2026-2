@@ -8,6 +8,7 @@ import { type BuildContext } from "../../../../context/build";
 import { expressionTransformers } from "../../../expression";
 import { transformCheckerType } from "../../../type/fromChecker";
 import { getInformationMethodIdentifier, getValueMethodIdentifier } from "../sharedDependency";
+import { getEitherRightValueType } from "../../callable";
 
 /**
  * ```ts
@@ -103,6 +104,8 @@ export async function matchInformationExpressionHandler(
 		let callArguments: readonly GoAST.Expression[] = [];
 
 		if (signature.parameters.length > 0) {
+			let paramTypeRef: GoAST.Type | GoAST.TypeReference | undefined = undefined;
+
 			const parameterType = await DCommon.asyncPipe(
 				transformCheckerType(
 					await typeChecker.getParameterType(signature, 0),
@@ -112,8 +115,15 @@ export async function matchInformationExpressionHandler(
 				DEither.unwrapRight,
 			);
 
-			if (DEither.isLeft(parameterType)) {
-				return parameterType;
+			if (!DEither.isLeft(parameterType)) {
+				paramTypeRef = parameterType.result;
+			} else {
+				const eitherType = await typeChecker.getTypeAtLocation(inputNode);
+				paramTypeRef = await getEitherRightValueType(eitherType, inputNode, context);
+			}
+
+			if (!paramTypeRef) {
+				return context.error(property.initializer, "match-information-cannot-determine-parameter-type");
 			}
 
 			callArguments = [
@@ -125,7 +135,7 @@ export async function matchInformationExpressionHandler(
 						}),
 						arguments: [],
 					}),
-					typeReference: parameterType.result,
+					typeReference: paramTypeRef,
 				}),
 			];
 		}
