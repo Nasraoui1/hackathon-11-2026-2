@@ -1,5 +1,7 @@
 # Hackathon DuploJS — rendu d’équipe
 
+> 📌 **Point d'entrée du rendu :** Retrouvez le découpage complet, l'historique des choix d'architecture et les exemples vérifiés dans [`problematiques/README.md`](./problematiques/README.md).
+
 ## Membres de l’équipe
 
 | | Nom | Prénom | Classe |
